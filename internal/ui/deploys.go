@@ -27,6 +27,7 @@ type deploysView struct {
 func newDeploysView(app *Model) *deploysView {
 	v := &deploysView{app: app, table: newDataTable()}
 	v.table.emptyText = "no deployments found"
+	v.table.SetCellStyle("Status", statusCellStyle)
 	return v
 }
 

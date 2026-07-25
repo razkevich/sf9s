@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/mattn/go-runewidth"
 )
 
@@ -31,11 +32,17 @@ type dataTable struct {
 	height int
 	colW   []int
 
-	emptyText string
+	emptyText  string
+	cellStyles map[string]func(string) lipgloss.Style
 }
 
 func newDataTable() *dataTable {
-	return &dataTable{emptyText: "no rows"}
+	return &dataTable{emptyText: "no rows", cellStyles: map[string]func(string) lipgloss.Style{}}
+}
+
+// SetCellStyle registers a semantic style for one column's cells.
+func (t *dataTable) SetCellStyle(col string, fn func(string) lipgloss.Style) {
+	t.cellStyles[col] = fn
 }
 
 func (t *dataTable) SetSize(width, height int) {
@@ -227,7 +234,7 @@ func (t *dataTable) View() string {
 	lastCol := t.lastVisibleCol()
 
 	var b strings.Builder
-	b.WriteString(t.renderRow(t.cols, lastCol, styleTableHeader, false))
+	b.WriteString(t.renderRow(t.cols, lastCol, rowHeader))
 	b.WriteByte('\n')
 
 	vis := t.visibleRows()
@@ -237,7 +244,11 @@ func (t *dataTable) View() string {
 	}
 	for i := t.top; i < min(t.top+vis, len(t.filtered)); i++ {
 		row := t.rows[t.filtered[i]]
-		b.WriteString(t.renderRow(row, lastCol, styleRowSelected, i != t.cursor))
+		kind := rowPlain
+		if i == t.cursor {
+			kind = rowSelected
+		}
+		b.WriteString(t.renderRow(row, lastCol, kind))
 		b.WriteByte('\n')
 	}
 	b.WriteString(t.footer(lastCol))
@@ -257,21 +268,44 @@ func (t *dataTable) lastVisibleCol() int {
 	return last
 }
 
-func (t *dataTable) renderRow(cells []string, lastCol int, style interface{ Render(...string) string }, plain bool) string {
+type rowKind int
+
+const (
+	rowPlain rowKind = iota
+	rowHeader
+	rowSelected
+)
+
+func (t *dataTable) renderRow(cells []string, lastCol int, kind rowKind) string {
+	remaining := t.width
 	var parts []string
 	for i := t.colOff; i <= lastCol && i < len(t.cols); i++ {
-		cell := ""
-		if i < len(cells) {
-			cell = cells[i]
+		w := min(t.colW[i], remaining)
+		if w <= 0 {
+			break
 		}
-		cell = runewidth.Truncate(cell, t.colW[i], "…")
-		parts = append(parts, runewidth.FillRight(cell, t.colW[i]))
+		raw := ""
+		if i < len(cells) {
+			raw = cells[i]
+		}
+		cell := runewidth.FillRight(runewidth.Truncate(raw, w, "…"), w)
+		if kind == rowPlain {
+			if fn, ok := t.cellStyles[t.cols[i]]; ok {
+				cell = fn(raw).Render(cell)
+			}
+		}
+		parts = append(parts, cell)
+		remaining -= w + 2
 	}
-	line := runewidth.Truncate(strings.Join(parts, "  "), t.width, "…")
-	if plain {
+	line := strings.Join(parts, "  ")
+	switch kind {
+	case rowHeader:
+		return styleTableHeader.Render(line)
+	case rowSelected:
+		return styleRowSelected.Render(line)
+	default:
 		return line
 	}
-	return style.Render(line)
 }
 
 func (t *dataTable) footer(lastCol int) string {

@@ -39,6 +39,7 @@ type logsView struct {
 func newLogsView(app *Model) *logsView {
 	v := &logsView{app: app, table: newDataTable()}
 	v.table.emptyText = "no apex logs — enable debug logging in Setup or via sf apex log"
+	v.table.SetCellStyle("Status", statusCellStyle)
 	return v
 }
 

@@ -20,6 +20,8 @@ type orgsView struct {
 func newOrgsView(app *Model) *orgsView {
 	v := &orgsView{app: app, table: newDataTable()}
 	v.table.emptyText = "no orgs — sf org login web --alias my-org"
+	v.table.SetCellStyle("Status", statusCellStyle)
+	v.table.SetCellStyle("Type", orgTypeCellStyle)
 	v.setOrgs(app.orgs)
 	return v
 }

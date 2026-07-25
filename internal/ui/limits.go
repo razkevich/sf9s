@@ -127,7 +127,7 @@ func usageBar(pct float64, width int) string {
 		pct = 1
 	}
 	filled := int(pct*float64(width) + 0.5)
-	bar := strings.Repeat("█", filled) + strings.Repeat("░", width-filled)
+	bar := strings.Repeat("▰", filled) + strings.Repeat("▱", width-filled)
 	switch {
 	case pct >= 0.9:
 		return styleErrText.Render(bar)

@@ -387,7 +387,7 @@ func (v *queryView) export(format string) tea.Cmd {
 }
 
 func (v *queryView) View(width, height int) string {
-	v.editor.SetWidth(width)
+	v.editor.SetWidth(width - 4)
 	if v.card != nil {
 		return v.card.View(width, height)
 	}
@@ -415,7 +415,13 @@ func (v *queryView) View(width, height int) string {
 		}
 	}
 
-	tableH := height - editorHeight - 3
+	editorBox := styleEditorBlurred
+	if !v.focusResults {
+		editorBox = styleEditorFocused
+	}
+	editor := editorBox.Width(width - 2).Render(v.editor.View())
+
+	tableH := height - editorHeight - 5
 	v.table.SetSize(width, tableH)
-	return head + "\n" + v.editor.View() + "\n" + resultHead + "\n" + v.table.View()
+	return head + "\n" + editor + "\n" + resultHead + "\n" + v.table.View()
 }

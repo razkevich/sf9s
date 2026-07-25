@@ -324,7 +324,8 @@ func (m *Model) View() string {
 		return "loading…"
 	}
 	if m.loadingOrgs {
-		return m.centered(m.spin.View() + "  discovering authenticated orgs (sf org list)…")
+		return m.centered(splashArt() + "\n\n" + m.spin.View() +
+			styleDim.Render("  discovering authenticated orgs (sf org list)…"))
 	}
 	if m.orgsErr != nil {
 		return m.centered(m.startupError())
@@ -365,8 +366,14 @@ func (m *Model) centered(s string) string {
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, s)
 }
 
+func splashArt() string {
+	cloud := styleDim.Render("      .--.\n   .-(    ).\n  (___.__)__)")
+	return cloud + "   " + styleLogo.Render("sf9s") + "\n\n" +
+		styleDim.Render("  Salesforce orgs in your terminal")
+}
+
 func (m *Model) topBar() string {
-	name := styleTopBar.Render(" sf9s ") + styleStatusDim.Render(m.deps.Version)
+	left := styleLogo.Render("⚡ sf9s") + " "
 	var tabs []string
 	for _, id := range viewOrder {
 		style := styleTab
@@ -375,14 +382,19 @@ func (m *Model) topBar() string {
 		}
 		tabs = append(tabs, style.Render(viewNames[id]))
 	}
-	bar := name + "  " + strings.Join(tabs, "")
-	return runeTrunc(bar, m.width)
+	left += strings.Join(tabs, "")
+	version := styleVersion.Render(m.deps.Version + " ")
+	pad := m.width - lipgloss.Width(left) - lipgloss.Width(version)
+	if pad < 0 {
+		return runeTrunc(left, m.width)
+	}
+	return left + strings.Repeat(" ", pad) + version
 }
 
 func (m *Model) statusBar() string {
-	org := styleStatusDim.Render("no org — pick one on the orgs view")
+	org := styleStatusDim.Render(" no org — pick one on the orgs view")
 	if m.current != nil {
-		org = styleStatusOrg.Render("⚡ "+m.current.Title()) +
+		org = styleStatusOrg.Render(" ⚡ "+m.current.Title()) +
 			styleStatusDim.Render(fmt.Sprintf(" %s [%s]", m.current.Username, m.current.Type()))
 	}
 	left := org
@@ -390,18 +402,22 @@ func (m *Model) statusBar() string {
 		style := styleStatusDim
 		switch m.status.kind {
 		case statusOK:
-			style = styleStatusOK
+			style = styleToastOK
 		case statusWarn:
-			style = styleStatusWarn
+			style = styleToastWarn
 		case statusError:
-			style = styleStatusErr
+			style = styleToastErr
 		}
-		left = org + "  " + style.Render(runeTrunc(m.status.text, m.width-lipgloss.Width(org)-4))
+		left = org + styleStatusDim.Render("  ") + style.Render(runeTrunc(m.status.text, m.width-lipgloss.Width(org)-4))
 	} else if !m.palette.open && !m.showHelp {
 		hints := m.currentView().Hints()
-		left = org + "  " + styleStatusDim.Render(hints)
+		left = org + styleStatusDim.Render("  "+hints)
 	}
-	return runeTrunc(left, m.width)
+	pad := m.width - lipgloss.Width(left)
+	if pad < 0 {
+		return runeTrunc(left, m.width)
+	}
+	return left + styleBand.Render(strings.Repeat(" ", pad))
 }
 
 // runeTrunc truncates a styled string to the terminal width.
