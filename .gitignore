@@ -1,0 +1,5 @@
+/sf9s
+/dist/
+/coverage.out
+*.test
+.DS_Store

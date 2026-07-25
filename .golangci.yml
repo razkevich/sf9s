@@ -1,0 +1,22 @@
+version: "2"
+
+linters:
+  default: standard
+  enable:
+    - misspell
+    - unconvert
+    - unparam
+    - gocritic
+    - revive
+    - nilerr
+    - errorlint
+    - copyloopvar
+  settings:
+    revive:
+      rules:
+        - name: unused-parameter
+          disabled: true
+
+formatters:
+  enable:
+    - gofmt
