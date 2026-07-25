@@ -54,7 +54,7 @@ schema is still downloading is answered when it arrives.
 
 | view | what you get |
 |---|---|
-| **orgs** | every authenticated org: type, status, scratch expiry, defaults. `o` opens it in the browser (logged in via frontdoor), `y` copies an access token, `Y` the instance URL |
+| **orgs** | every authenticated org: type, status, scratch expiry, defaults. `o` opens it in the browser (via `sf org open`), `y` copies an access token, `Y` the instance URL |
 | **query** | multi-line SOQL editor with **autocomplete** (`tab`), history (`ctrl+p/n`), saved-query library (`ctrl+s`), Tooling API toggle (`ctrl+t`), pagination (`m`), row inspector (`enter`), copy cell/row (`y`/`Y`), CSV/JSON export (`e`/`E`) |
 | **schema** | fuzzy-searchable objects → fields with types, reference targets, picklist values; `c` builds a SELECT for the query view, `y` copies API names |
 | **limits** | org limits sorted by usage, with thresholds that go amber at 75% and red at 90% |

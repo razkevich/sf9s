@@ -100,6 +100,10 @@ func New() *Server {
 			{"name":"Id","label":"Record ID","type":"id"},
 			{"name":"Name","label":"Name","type":"string","length":255,"nillable":false,"createable":true,"updateable":true},
 			{"name":"OwnerId","label":"Owner ID","type":"reference","referenceTo":["User"],"relationshipName":"Owner"},
+			{"name":"ParentId","label":"Parent Account ID","type":"reference","referenceTo":["Account"],"relationshipName":"Parent"},
+			{"name":"Phone","label":"Account Phone","type":"phone","length":40},
+			{"name":"PhotoUrl","label":"Photo URL","type":"url","length":1024},
+			{"name":"AnnualRevenue","label":"Annual Revenue","type":"currency"},
 			{"name":"Industry","label":"Industry","type":"picklist","nillable":true,"createable":true,"updateable":true,"picklistValues":[{"label":"Technology","value":"Technology","active":true},{"label":"Energy","value":"Energy","active":true}]}]}`, name, name)
 	})
 

@@ -12,6 +12,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/textarea"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 
 	"github.com/razkevich/sf9s/internal/api"
 	"github.com/razkevich/sf9s/internal/config"
@@ -691,12 +692,19 @@ func (v *queryView) View(width, height int) string {
 	}
 	editor := editorBox.Width(width - 2).Render(v.editor.View())
 
+	tableH := max(height-edH-4, 3)
 	if v.popup.open() {
+		// Keep results visible under the suggestions when there's room.
 		popup := v.popup.View(width)
-		return head + "\n" + editor + "\n" + popup
+		popupH := lipgloss.Height(popup)
+		remaining := height - edH - 3 - popupH
+		if remaining < 4 {
+			return head + "\n" + editor + "\n" + popup
+		}
+		v.table.SetSize(width, remaining)
+		return head + "\n" + editor + "\n" + popup + "\n" + v.table.View()
 	}
 
-	tableH := max(height-edH-4, 3)
 	v.table.SetSize(width, tableH)
 	return head + "\n" + editor + "\n" + resultHead + "\n" + v.table.View()
 }
