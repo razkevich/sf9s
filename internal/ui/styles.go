@@ -29,6 +29,11 @@ var (
 	styleToastWarn = lipgloss.NewStyle().Foreground(colorWarn).Background(colorBand)
 	styleToastErr  = lipgloss.NewStyle().Bold(true).Foreground(colorErr).Background(colorBand)
 
+	styleProdBadge = lipgloss.NewStyle().Bold(true).
+			Foreground(lipgloss.AdaptiveColor{Light: "#FFFFFF", Dark: "#FFFFFF"}).
+			Background(colorErr)
+	styleProdText = lipgloss.NewStyle().Bold(true).Foreground(colorErr)
+
 	styleTableHeader = lipgloss.NewStyle().Bold(true).Foreground(colorAccent)
 	styleRowSelected = lipgloss.NewStyle().Bold(true).
 				Foreground(colorOnAccent).Background(colorAccent)

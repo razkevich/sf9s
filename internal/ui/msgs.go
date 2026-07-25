@@ -3,6 +3,7 @@ package ui
 import (
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/razkevich/sf9s/internal/api"
 	"github.com/razkevich/sf9s/internal/sfcli"
 )
 
@@ -45,6 +46,13 @@ type orgsLoadedMsg struct {
 type goBackMsg struct{}
 
 func goBack() tea.Msg { return goBackMsg{} }
+
+// orgInfoMsg carries an org's own description of itself.
+type orgInfoMsg struct {
+	orgID string
+	info  *api.OrgInfo
+	err   error
+}
 
 // switchViewMsg asks the root to activate a view.
 type switchViewMsg struct{ id ViewID }

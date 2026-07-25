@@ -100,6 +100,13 @@ func (m *Model) contextBlock() string {
 		kind = m.current.Type()
 		status = m.current.ConnectedStatus
 	}
+	// The org's own edition is more honest than the CLI's flags, which
+	// cannot tell production from Developer Edition.
+	if info := m.currentOrgInfo(); info != nil {
+		if edition := info.Edition(); edition != "" {
+			kind = edition
+		}
+	}
 	api := ""
 	if m.current != nil && m.current.InstanceURL != "" {
 		api = m.current.InstanceURL
@@ -121,11 +128,17 @@ func (m *Model) contextBlock() string {
 		}
 		value := runewidth.Truncate(r[1], 30, "…")
 		b.WriteString(styleHeaderKey.Render(padRight(r[0]+":", 7)))
-		if r[0] == "Status" {
+		switch {
+		case r[0] == "Status":
 			b.WriteString(statusCellStyle(value).Render(value))
-			continue
+		case r[0] == "Org" && m.inProduction():
+			// Impossible to miss: this org holds live business data.
+			b.WriteString(styleProdBadge.Render(" PROD ") + " " + styleProdText.Render(value))
+		case r[0] == "Type" && m.inProduction():
+			b.WriteString(styleProdText.Render(value))
+		default:
+			b.WriteString(styleHeaderValue.Render(value))
 		}
-		b.WriteString(styleHeaderValue.Render(value))
 	}
 	return lipgloss.NewStyle().PaddingLeft(1).PaddingRight(3).Render(b.String())
 }

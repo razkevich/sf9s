@@ -1,12 +1,14 @@
 package ui
 
 import (
+	"context"
 	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/razkevich/sf9s/internal/api"
 	"github.com/razkevich/sf9s/internal/sfcli"
 )
 
@@ -217,5 +219,64 @@ func TestHeaderKeepsOrgHotkeysWhenNarrow(t *testing.T) {
 				break
 			}
 		}
+	}
+}
+
+func TestProductionOrgIsUnmistakable(t *testing.T) {
+	m := multiOrgModel(t)
+	if m.current == nil {
+		t.Fatal("precondition: an org is selected")
+	}
+	// Before the org answers, nothing is claimed either way.
+	if m.inProduction() {
+		t.Error("production must not be assumed before the org says so")
+	}
+
+	drive(t, m, orgInfoMsg{orgID: m.current.OrgID, info: &api.OrgInfo{
+		Name: "Acme", OrganizationType: "Enterprise Edition",
+	}})
+	if !m.inProduction() {
+		t.Fatal("an Enterprise org that is not a sandbox or trial is production")
+	}
+	view := m.View()
+	if !strings.Contains(view, "PROD") {
+		t.Fatalf("the header must mark production unmistakably:\n%s", view)
+	}
+	if !strings.Contains(view, "enterprise") {
+		t.Fatalf("the header should show the real edition:\n%s", view)
+	}
+	if !strings.Contains(view, "is PRODUCTION") {
+		t.Fatalf("switching into production should warn:\n%s", view)
+	}
+}
+
+func TestSandboxIsNotFlaggedAsProduction(t *testing.T) {
+	m := multiOrgModel(t)
+	drive(t, m, orgInfoMsg{orgID: m.current.OrgID, info: &api.OrgInfo{
+		OrganizationType: "Enterprise Edition", IsSandbox: true,
+	}})
+	if m.inProduction() {
+		t.Fatal("a sandbox of an enterprise org is not production")
+	}
+	if strings.Contains(m.View(), "PROD ") {
+		t.Fatalf("no production badge belongs on a sandbox:\n%s", m.View())
+	}
+	if !strings.Contains(m.View(), "sandbox") {
+		t.Fatalf("the header should say sandbox:\n%s", m.View())
+	}
+}
+
+func TestOrgInfoFailureIsNonFatal(t *testing.T) {
+	m := multiOrgModel(t)
+	before := m.View()
+	drive(t, m, orgInfoMsg{orgID: m.current.OrgID, err: context.DeadlineExceeded})
+	if m.inProduction() {
+		t.Error("a failed identity lookup must not claim production")
+	}
+	if m.current == nil {
+		t.Error("a failed identity lookup must not unselect the org")
+	}
+	if strings.Contains(m.View(), "deadline") {
+		t.Errorf("identity is advisory; its failure should not shout at the user:\nbefore:\n%s\nafter:\n%s", before, m.View())
 	}
 }

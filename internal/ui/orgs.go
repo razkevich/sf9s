@@ -108,7 +108,7 @@ func (v *orgsView) Update(msg tea.Msg) tea.Cmd {
 			// silently swallowing the first characters a user types.
 			if org := v.selected(); org != nil {
 				v.app.setOrg(*org)
-				cmds := []tea.Cmd{toast(statusOK, "using org "+org.Title())}
+				cmds := []tea.Cmd{toast(statusOK, "using org "+org.Title()), v.app.takePendingOrgInfo()}
 				if msg.String() == "enter" {
 					cmds = append(cmds, v.app.navigate(ViewQuery))
 				}

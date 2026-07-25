@@ -300,3 +300,63 @@ func (c *Client) DeleteApexLog(ctx context.Context, id string) error {
 	body.Close()
 	return nil
 }
+
+// OrgInfo is the org's own record of what it is. The sf CLI cannot tell a
+// production org from a Developer Edition — both are "not a sandbox" — so
+// sf9s asks the org itself before letting you work in it.
+type OrgInfo struct {
+	ID                  string `json:"Id"`
+	Name                string `json:"Name"`
+	OrganizationType    string `json:"OrganizationType"`
+	InstanceName        string `json:"InstanceName"`
+	IsSandbox           bool   `json:"IsSandbox"`
+	TrialExpirationDate string `json:"TrialExpirationDate"`
+}
+
+// Production reports whether this org is a real production tenant: a paid
+// edition that is neither a sandbox nor time-limited. Developer Edition,
+// trials, scratch orgs and sandboxes are all safe to poke at; the rest hold
+// someone's live business data.
+func (o OrgInfo) Production() bool {
+	if o.IsSandbox || o.TrialExpirationDate != "" {
+		return false
+	}
+	switch o.OrganizationType {
+	case "", "Developer Edition", "Base Edition":
+		return false
+	default:
+		return true
+	}
+}
+
+// Edition is the short label shown in the header.
+func (o OrgInfo) Edition() string {
+	switch {
+	case o.IsSandbox:
+		return "sandbox"
+	case o.TrialExpirationDate != "":
+		return "trial"
+	case o.OrganizationType == "Developer Edition":
+		return "developer"
+	case o.OrganizationType == "":
+		return ""
+	default:
+		return strings.ToLower(strings.TrimSuffix(o.OrganizationType, " Edition"))
+	}
+}
+
+const orgInfoSOQL = `SELECT Id, Name, OrganizationType, InstanceName, IsSandbox, TrialExpirationDate FROM Organization`
+
+// FetchOrgInfo reads the org's identity record.
+func (c *Client) FetchOrgInfo(ctx context.Context) (*OrgInfo, error) {
+	var payload struct {
+		Records []OrgInfo `json:"records"`
+	}
+	if err := c.get(ctx, "query?q="+url.QueryEscape(orgInfoSOQL), &payload); err != nil {
+		return nil, err
+	}
+	if len(payload.Records) == 0 {
+		return nil, fmt.Errorf("org returned no Organization record")
+	}
+	return &payload.Records[0], nil
+}

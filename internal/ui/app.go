@@ -105,6 +105,10 @@ type Model struct {
 
 	current *sfcli.Org
 	client  *api.Client
+	// orgInfo is what each org says it is (edition, sandbox, trial), keyed by
+	// org id. The sf CLI cannot distinguish production from Developer
+	// Edition, and working in the wrong one is the costliest mistake here.
+	orgInfo map[string]*api.OrgInfo
 
 	active ViewID
 	// stack is the navigation trail behind the active view; esc pops it, the
@@ -122,6 +126,9 @@ type Model struct {
 	statusTTL   time.Duration
 
 	reqSeq int
+	// pendingOrgInfo carries the org-identity fetch that setOrg started, so
+	// callers can return it as a command.
+	pendingOrgInfo tea.Cmd
 
 	spin spinner.Model
 }
@@ -148,6 +155,7 @@ func New(deps Deps) *Model {
 		loadingOrgs: true,
 		active:      ViewOrgs,
 		statusTTL:   5 * time.Second,
+		orgInfo:     map[string]*api.OrgInfo{},
 	}
 	return m
 }
@@ -239,6 +247,57 @@ func (m *Model) setOrg(org sfcli.Org) {
 	if qv, ok := m.views[ViewQuery].(*queryView); ok {
 		qv.resetOrg()
 	}
+	m.pendingOrgInfo = m.loadOrgInfo(o)
+}
+
+const orgInfoTTL = 24 * time.Hour
+
+// loadOrgInfo asks the org what it is, from cache when possible. Returns nil
+// when the answer is already known.
+func (m *Model) loadOrgInfo(org sfcli.Org) tea.Cmd {
+	if org.OrgID == "" || m.orgInfo[org.OrgID] != nil {
+		return nil
+	}
+	var cached api.OrgInfo
+	if m.deps.Store.CacheGet("org-info-"+org.OrgID, orgInfoTTL, &cached) && cached.OrganizationType != "" {
+		m.orgInfo[org.OrgID] = &cached
+		return nil
+	}
+	client := m.client
+	store := m.deps.Store
+	id := org.OrgID
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		defer cancel()
+		info, err := client.FetchOrgInfo(ctx)
+		if err != nil {
+			return orgInfoMsg{orgID: id, err: err}
+		}
+		store.CachePut("org-info-"+id, info)
+		return orgInfoMsg{orgID: id, info: info}
+	}
+}
+
+// takePendingOrgInfo hands the identity fetch started by setOrg to whoever
+// can return a command.
+func (m *Model) takePendingOrgInfo() tea.Cmd {
+	cmd := m.pendingOrgInfo
+	m.pendingOrgInfo = nil
+	return cmd
+}
+
+// currentOrgInfo is what the selected org reports about itself, if known yet.
+func (m *Model) currentOrgInfo() *api.OrgInfo {
+	if m.current == nil {
+		return nil
+	}
+	return m.orgInfo[m.current.OrgID]
+}
+
+// inProduction reports whether the selected org holds live business data.
+func (m *Model) inProduction() bool {
+	info := m.currentOrgInfo()
+	return info != nil && info.Production()
 }
 
 func (m *Model) navigate(id ViewID) tea.Cmd {
@@ -385,6 +444,16 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, tea.Batch(cmds...)
 
+	case orgInfoMsg:
+		if msg.err != nil {
+			return m, nil // identity is advisory; the org still works
+		}
+		m.orgInfo[msg.orgID] = msg.info
+		if m.current != nil && m.current.OrgID == msg.orgID && msg.info.Production() {
+			return m, toast(statusWarn, "⚠ "+m.current.Title()+" is PRODUCTION ("+msg.info.Edition()+") — changes here are real")
+		}
+		return m, nil
+
 	case statusMsg:
 		m.status = msg
 		m.statusSeq++
@@ -440,7 +509,7 @@ func (m *Model) switchOrgByHotkey(key string) tea.Cmd {
 	for _, o := range m.orgs {
 		if o.Title() == title {
 			m.setOrg(o)
-			return toast(statusOK, "switched to "+title)
+			return tea.Batch(toast(statusOK, "switched to "+title), m.takePendingOrgInfo())
 		}
 	}
 	return nil
@@ -505,7 +574,7 @@ func (m *Model) autoSelectOrg() tea.Cmd {
 		for _, o := range m.orgs {
 			if o.Alias == m.deps.InitialOrg || o.Username == m.deps.InitialOrg {
 				m.setOrg(o)
-				return nil
+				return m.takePendingOrgInfo()
 			}
 		}
 		// An explicitly requested org that doesn't exist must not silently
@@ -515,7 +584,7 @@ func (m *Model) autoSelectOrg() tea.Cmd {
 	for _, o := range m.orgs {
 		if o.IsDefault {
 			m.setOrg(o)
-			return nil
+			return m.takePendingOrgInfo()
 		}
 	}
 	return nil
