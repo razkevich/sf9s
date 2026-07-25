@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 
 	"github.com/razkevich/sf9s/internal/sfcli"
 )
@@ -192,5 +193,29 @@ func TestCompactHeaderOnSmallTerminal(t *testing.T) {
 	m.width, m.height = 120, 40
 	if m.compactHeader() {
 		t.Error("a 120x40 terminal should use the full header")
+	}
+}
+
+func TestHeaderKeepsOrgHotkeysWhenNarrow(t *testing.T) {
+	m := multiOrgModel(t)
+	// Long aliases and a long instance host, the way a real org list looks.
+	for i := range m.orgs {
+		m.orgs[i].Alias = "very-long-org-alias-" + m.orgs[i].Alias
+		m.orgs[i].InstanceURL = "https://some-long-instance-name.my.salesforce.com"
+	}
+	m.setOrg(m.orgs[0])
+
+	for _, width := range []int{130, 110, 95} {
+		m.width, m.height = width, 40
+		view := m.View()
+		if !strings.Contains(view, "<1>") {
+			t.Errorf("width %d dropped the org hotkeys:\n%s", width, view)
+		}
+		for _, line := range strings.Split(view, "\n") {
+			if lipgloss.Width(line) > width {
+				t.Errorf("width %d: line overflows by %d", width, lipgloss.Width(line)-width)
+				break
+			}
+		}
 	}
 }

@@ -73,19 +73,23 @@ func (m *Model) header() string {
 
 	context := m.contextBlock()
 	keys := m.keyBlock()
-	orgs := m.orgBlock()
-	logo := m.logoBlock()
 
-	// Drop blocks from the right when the terminal cannot fit them.
-	blocks := []string{context, keys, orgs, logo}
-	for len(blocks) > 1 {
+	// Narrow the header by degrees rather than dropping the org hotkeys, which
+	// are the fastest way to move around. The logo goes first, then the org
+	// block folds to one column, and only then is anything omitted.
+	for _, blocks := range [][]string{
+		{context, keys, m.orgBlock(2), m.logoBlock()},
+		{context, keys, m.orgBlock(2)},
+		{context, keys, m.orgBlock(1)},
+		{context, m.orgBlock(1)},
+		{context},
+	} {
 		joined := lipgloss.JoinHorizontal(lipgloss.Top, blocks...)
 		if lipgloss.Width(joined) <= m.width {
 			return joined
 		}
-		blocks = blocks[:len(blocks)-1]
 	}
-	return runeTrunc(blocks[0], m.width)
+	return runeTrunc(context, m.width)
 }
 
 func (m *Model) contextBlock() string {
@@ -115,7 +119,7 @@ func (m *Model) contextBlock() string {
 		if i > 0 {
 			b.WriteByte('\n')
 		}
-		value := runewidth.Truncate(r[1], 34, "…")
+		value := runewidth.Truncate(r[1], 30, "…")
 		b.WriteString(styleHeaderKey.Render(padRight(r[0]+":", 7)))
 		if r[0] == "Status" {
 			b.WriteString(statusCellStyle(value).Render(value))
@@ -138,16 +142,22 @@ func (m *Model) keyBlock() string {
 	return renderKeyColumns(hints, headerRows, 3)
 }
 
-func (m *Model) orgBlock() string {
+// orgBlock renders the numbered org hotkeys in at most cols columns. Aliases
+// are truncated: the number is what you press, the name only has to be
+// recognizable.
+func (m *Model) orgBlock(cols int) string {
 	titles := m.hotkeyOrgs()
 	if len(titles) == 0 {
 		return ""
 	}
+	if cols == 1 {
+		titles = titles[:min(len(titles), headerRows)]
+	}
 	hints := make([]keyHint, 0, len(titles))
 	for i, t := range titles {
-		hints = append(hints, keyHint{fmt.Sprintf("%d", i+1), t})
+		hints = append(hints, keyHint{fmt.Sprintf("%d", i+1), runewidth.Truncate(t, 14, "…")})
 	}
-	return renderKeyColumns(hints, headerRows, 2)
+	return renderKeyColumns(hints, headerRows, cols)
 }
 
 // renderKeyColumns lays hints out top-to-bottom in up to maxCols columns of
