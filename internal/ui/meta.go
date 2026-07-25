@@ -35,7 +35,7 @@ func (v *metaView) Hints() string {
 	if v.inComps {
 		return "y copy name • esc back • / filter"
 	}
-	return "enter list components • / filter"
+	return "enter list components • R reload • / filter"
 }
 
 func (v *metaView) Capturing() bool {
@@ -55,14 +55,18 @@ type metaCompsMsg struct {
 }
 
 func (v *metaView) Init() tea.Cmd {
-	key := "metadata-types-" + v.app.current.OrgID
 	var cached []sfcli.MetadataType
-	if v.app.deps.Store.CacheGet(key, describeTTL, &cached) && len(cached) > 0 {
+	if v.app.deps.Store.CacheGet("metadata-types-"+v.app.current.OrgID, describeTTL, &cached) && len(cached) > 0 {
 		v.setTypes(cached)
 		return nil
 	}
+	return v.fetchTypes()
+}
+
+func (v *metaView) fetchTypes() tea.Cmd {
+	key := "metadata-types-" + v.app.current.OrgID
 	v.loading = true
-	v.gen++
+	v.gen = v.app.nextGen()
 	gen := v.gen
 	sf := v.app.deps.SF
 	store := v.app.deps.Store
@@ -93,7 +97,7 @@ func (v *metaView) setTypes(types []sfcli.MetadataType) {
 
 func (v *metaView) loadComponents(metadataType string) tea.Cmd {
 	v.loading = true
-	v.gen++
+	v.gen = v.app.nextGen()
 	gen := v.gen
 	sf := v.app.deps.SF
 	username := v.app.current.Username
@@ -156,6 +160,10 @@ func (v *metaView) Update(msg tea.Msg) tea.Cmd {
 				return nil
 			}
 			return goBack
+		case "R":
+			if !v.inComps && !v.loading {
+				return v.fetchTypes()
+			}
 		case "y":
 			if v.inComps {
 				if name := v.compTable.Cell("Full name"); name != "" {

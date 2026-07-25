@@ -86,6 +86,67 @@ func TestHistoryRoundTripDedupAndCap(t *testing.T) {
 	}
 }
 
+func TestConcurrentAppendHistorySafe(t *testing.T) {
+	s := tempStore(t)
+	done := make(chan struct{})
+	for i := 0; i < 8; i++ {
+		go func(n int) {
+			defer func() { done <- struct{}{} }()
+			for j := 0; j < 20; j++ {
+				s.AppendHistory("SELECT " + string(rune('A'+n)))
+			}
+		}(i)
+	}
+	for i := 0; i < 8; i++ {
+		<-done
+	}
+	got := s.History()
+	if len(got) != 8 {
+		t.Fatalf("all 8 distinct queries must survive concurrent writes, got %d: %v", len(got), got)
+	}
+}
+
+func TestCacheKeyCannotEscapeCacheDir(t *testing.T) {
+	s := tempStore(t)
+	hostile := "describe-00D1-../../../../victim/pwned"
+	s.CachePut(hostile, map[string]string{"x": "y"})
+	outside := filepath.Join(filepath.Dir(s.paths.CacheDir), "victim")
+	if _, err := os.Stat(outside); err == nil {
+		t.Fatalf("cache write escaped to %s", outside)
+	}
+	entries, err := os.ReadDir(s.paths.CacheDir)
+	if err != nil || len(entries) != 1 {
+		t.Fatalf("expected one file inside the cache dir, got %v (%v)", entries, err)
+	}
+	var back map[string]string
+	if !s.CacheGet(hostile, time.Minute, &back) || back["x"] != "y" {
+		t.Fatal("hashed keys must still round-trip")
+	}
+}
+
+func TestPersistedFilesArePrivate(t *testing.T) {
+	s := tempStore(t)
+	s.SavedQueries()
+	s.AppendHistory("SELECT Id FROM Contact WHERE Email = 'a@b.c'")
+	s.CachePut("k", 1)
+	for _, p := range []string{s.queriesPath(), s.historyPath()} {
+		info, err := os.Stat(p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if perm := info.Mode().Perm(); perm != 0o600 {
+			t.Errorf("%s has mode %o, want 600 — it can hold sensitive SOQL", p, perm)
+		}
+	}
+	info, err := os.Stat(s.paths.ConfigDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if perm := info.Mode().Perm(); perm != 0o700 {
+		t.Errorf("config dir has mode %o, want 700", perm)
+	}
+}
+
 func TestCacheRoundTripAndTTL(t *testing.T) {
 	s := tempStore(t)
 	type payload struct{ Names []string }

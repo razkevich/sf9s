@@ -38,6 +38,19 @@ type Runner interface {
 	Run(ctx context.Context, args ...string) ([]byte, error)
 }
 
+// safeArg rejects values that would read as flags. Aliases and metadata type
+// names originate outside sf9s, and `sf` has flags (e.g. --output-file) that
+// write to disk.
+func safeArg(kind, value string) error {
+	if value == "" {
+		return fmt.Errorf("empty %s", kind)
+	}
+	if strings.HasPrefix(value, "-") {
+		return fmt.Errorf("refusing %s that looks like a flag: %q", kind, value)
+	}
+	return nil
+}
+
 // ExecRunner runs the real `sf` executable with --json appended.
 type ExecRunner struct {
 	Bin string
@@ -58,13 +71,15 @@ func (r ExecRunner) Run(ctx context.Context, args ...string) ([]byte, error) {
 		if errors.As(err, &execErr) && errors.Is(execErr.Err, exec.ErrNotFound) {
 			return nil, ErrCLINotFound
 		}
+		// A context kill leaves truncated stdout — report the timeout, not
+		// a bogus JSON parse error.
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		// sf exits non-zero on command failure but still prints a JSON
 		// envelope on stdout; let the caller parse it for the message.
 		if stdout.Len() > 0 {
 			return stdout.Bytes(), nil
-		}
-		if ctx.Err() != nil {
-			return nil, ctx.Err()
 		}
 		msg := strings.TrimSpace(stderr.String())
 		if msg == "" {
@@ -267,6 +282,9 @@ func (c *Client) Orgs(ctx context.Context) ([]Org, error) {
 // Credentials resolves a fresh access token for the org; the sf CLI
 // transparently refreshes expired tokens during this call.
 func (c *Client) Credentials(ctx context.Context, usernameOrAlias string) (Credentials, error) {
+	if err := safeArg("org", usernameOrAlias); err != nil {
+		return Credentials{}, err
+	}
 	out, err := c.runner.Run(ctx, "org", "display", "-o", usernameOrAlias)
 	if err != nil {
 		return Credentials{}, err
@@ -279,8 +297,24 @@ func (c *Client) Credentials(ctx context.Context, usernameOrAlias string) (Crede
 	return creds, nil
 }
 
+// OpenOrg launches the org in a browser via the CLI, so the session token
+// never passes through sf9s' own process arguments or a URL we construct.
+func (c *Client) OpenOrg(ctx context.Context, usernameOrAlias string) error {
+	if err := safeArg("org", usernameOrAlias); err != nil {
+		return err
+	}
+	out, err := c.runner.Run(ctx, "org", "open", "-o", usernameOrAlias)
+	if err != nil {
+		return err
+	}
+	return unwrap(out, nil)
+}
+
 // MetadataTypes lists the metadata types the org supports.
 func (c *Client) MetadataTypes(ctx context.Context, usernameOrAlias string) ([]MetadataType, error) {
+	if err := safeArg("org", usernameOrAlias); err != nil {
+		return nil, err
+	}
 	out, err := c.runner.Run(ctx, "org", "list", "metadata-types", "-o", usernameOrAlias)
 	if err != nil {
 		return nil, err
@@ -300,6 +334,12 @@ func (c *Client) MetadataTypes(ctx context.Context, usernameOrAlias string) ([]M
 // ListMetadata lists components of one metadata type. The result key is an
 // array for most types, a single object for types with exactly one component.
 func (c *Client) ListMetadata(ctx context.Context, usernameOrAlias, metadataType string) ([]MetadataComponent, error) {
+	if err := safeArg("org", usernameOrAlias); err != nil {
+		return nil, err
+	}
+	if err := safeArg("metadata type", metadataType); err != nil {
+		return nil, err
+	}
 	out, err := c.runner.Run(ctx, "org", "list", "metadata", "-m", metadataType, "-o", usernameOrAlias)
 	if err != nil {
 		return nil, err

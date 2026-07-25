@@ -3,10 +3,13 @@
 package config
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -58,9 +61,12 @@ queries:
     query: SELECT UserId, User.Name, LoginTime, Status, SourceIp, Application FROM LoginHistory WHERE Status != 'Success' AND LoginTime = LAST_N_DAYS:7 ORDER BY LoginTime DESC LIMIT 100
 `
 
-// Store is the entry point for all persisted state.
+// Store is the entry point for all persisted state. History writes are
+// serialized and atomic: concurrent queries must never corrupt or truncate
+// the user's history file.
 type Store struct {
-	paths Paths
+	paths  Paths
+	histMu sync.Mutex
 }
 
 func NewStore(paths Paths) *Store {
@@ -74,10 +80,10 @@ func (s *Store) historyPath() string { return filepath.Join(s.paths.ConfigDir, "
 func (s *Store) SavedQueries() ([]SavedQuery, error) {
 	raw, err := os.ReadFile(s.queriesPath())
 	if errors.Is(err, os.ErrNotExist) {
-		if err := os.MkdirAll(s.paths.ConfigDir, 0o755); err != nil {
+		if err := os.MkdirAll(s.paths.ConfigDir, 0o700); err != nil {
 			return nil, err
 		}
-		if err := os.WriteFile(s.queriesPath(), []byte(starterQueries), 0o644); err != nil {
+		if err := os.WriteFile(s.queriesPath(), []byte(starterQueries), 0o600); err != nil {
 			return nil, err
 		}
 		raw = []byte(starterQueries)
@@ -97,6 +103,12 @@ const historyCap = 500
 
 // History returns persisted query history, most recent first.
 func (s *Store) History() []string {
+	s.histMu.Lock()
+	defer s.histMu.Unlock()
+	return s.readHistory()
+}
+
+func (s *Store) readHistory() []string {
 	raw, err := os.ReadFile(s.historyPath())
 	if err != nil {
 		return nil
@@ -109,11 +121,13 @@ func (s *Store) History() []string {
 }
 
 // AppendHistory prepends a query, dedups it against prior entries, caps the
-// list, and persists it. Best-effort: persistence errors are returned but
-// the in-memory result is always usable.
+// list, and persists it atomically. Best-effort: persistence errors are
+// returned but the in-memory result is always usable.
 func (s *Store) AppendHistory(query string) ([]string, error) {
+	s.histMu.Lock()
+	defer s.histMu.Unlock()
 	entries := []string{query}
-	for _, e := range s.History() {
+	for _, e := range s.readHistory() {
 		if e != query {
 			entries = append(entries, e)
 		}
@@ -121,14 +135,37 @@ func (s *Store) AppendHistory(query string) ([]string, error) {
 	if len(entries) > historyCap {
 		entries = entries[:historyCap]
 	}
-	if err := os.MkdirAll(s.paths.ConfigDir, 0o755); err != nil {
+	if err := os.MkdirAll(s.paths.ConfigDir, 0o700); err != nil {
 		return entries, err
 	}
 	raw, err := json.MarshalIndent(entries, "", " ")
 	if err != nil {
 		return entries, err
 	}
-	return entries, os.WriteFile(s.historyPath(), raw, 0o644)
+	return entries, atomicWrite(s.historyPath(), raw)
+}
+
+// atomicWrite lands the file via a same-directory temp file + rename so a
+// reader can never observe a truncated write.
+func atomicWrite(path string, data []byte) error {
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".tmp-*")
+	if err != nil {
+		return err
+	}
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmp.Name())
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(tmp.Name())
+		return err
+	}
+	if err := os.Chmod(tmp.Name(), 0o600); err != nil {
+		_ = os.Remove(tmp.Name())
+		return err
+	}
+	return os.Rename(tmp.Name(), path)
 }
 
 type cacheEnvelope struct {
@@ -136,9 +173,16 @@ type cacheEnvelope struct {
 	Data    json.RawMessage `json:"data"`
 }
 
+// cachePath hashes the key so server-supplied strings (sObject and metadata
+// type names) can never escape the cache directory.
+func (s *Store) cachePath(key string) string {
+	sum := sha256.Sum256([]byte(key))
+	return filepath.Join(s.paths.CacheDir, hex.EncodeToString(sum[:])+".json")
+}
+
 // CacheGet loads a cached value if it exists and is younger than maxAge.
 func (s *Store) CacheGet(key string, maxAge time.Duration, into any) bool {
-	raw, err := os.ReadFile(filepath.Join(s.paths.CacheDir, key+".json"))
+	raw, err := os.ReadFile(s.cachePath(key))
 	if err != nil {
 		return false
 	}
@@ -163,9 +207,8 @@ func (s *Store) CachePut(key string, value any) {
 	if err != nil {
 		return
 	}
-	path := filepath.Join(s.paths.CacheDir, key+".json")
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := os.MkdirAll(s.paths.CacheDir, 0o700); err != nil {
 		return
 	}
-	_ = os.WriteFile(path, raw, 0o644)
+	_ = os.WriteFile(s.cachePath(key), raw, 0o600)
 }

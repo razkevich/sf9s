@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -79,16 +80,45 @@ func (t *dataTable) AppendRows(rows [][]string) {
 	t.applyFilter()
 }
 
+// escapeSeq matches CSI and OSC sequences. Untrusted org data must never
+// reach the terminal as control codes: OSC 52 alone would let a crafted
+// field or log line rewrite the operator's clipboard.
+var escapeSeq = regexp.MustCompile(`\x1b(\[[0-9;?]*[ -/]*[@-~]|\][^\x07\x1b]*(\x07|\x1b\\)?|[@-Z\\-_])`)
+
+func stripEscapes(s string) string {
+	if !strings.ContainsRune(s, '\x1b') {
+		return s
+	}
+	return escapeSeq.ReplaceAllString(s, "")
+}
+
 func sanitizeCell(s string) string {
 	return strings.Map(func(r rune) rune {
 		if r == '\n' || r == '\r' || r == '\t' {
 			return ' '
 		}
-		if r < 32 {
+		if r < 32 || r == 0x7f {
 			return -1
 		}
 		return r
-	}, s)
+	}, stripEscapes(s))
+}
+
+// sanitizeText keeps line structure (for log bodies) but removes escape
+// sequences and other control bytes.
+func sanitizeText(s string) string {
+	return strings.Map(func(r rune) rune {
+		if r == '\n' || r == '\t' {
+			return r
+		}
+		if r == '\r' {
+			return -1
+		}
+		if r < 32 || r == 0x7f {
+			return -1
+		}
+		return r
+	}, stripEscapes(s))
 }
 
 func (t *dataTable) computeWidths() {
@@ -193,10 +223,21 @@ func (t *dataTable) Update(msg tea.KeyMsg) bool {
 				t.filter = string(r[:len(r)-1])
 				t.applyFilter()
 			}
+		case tea.KeyUp:
+			t.cursor--
+			t.clampScroll()
+		case tea.KeyDown:
+			t.cursor++
+			t.clampScroll()
 		case tea.KeyRunes, tea.KeySpace:
 			t.filter += string(msg.Runes)
 			t.applyFilter()
 		}
+		return true
+	}
+	if msg.String() == "esc" && t.filter != "" {
+		t.filter = ""
+		t.applyFilter()
 		return true
 	}
 	switch msg.String() {
@@ -218,8 +259,6 @@ func (t *dataTable) Update(msg tea.KeyMsg) bool {
 		t.colOff++
 	case "/":
 		t.filtering = true
-		t.filter = ""
-		t.applyFilter()
 	default:
 		return false
 	}
@@ -320,7 +359,7 @@ func (t *dataTable) footer(lastCol int) string {
 	if t.filtering {
 		seg += "  filter: " + t.filter + "▌"
 	} else if t.filter != "" {
-		seg += "  filter: " + t.filter + " (esc clears via /)"
+		seg += "  filter: " + t.filter + " (esc clears, / edits)"
 	}
 	return styleDim.Render(runewidth.Truncate(seg, t.width, "…"))
 }

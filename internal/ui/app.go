@@ -89,7 +89,17 @@ type Model struct {
 	statusSeq   int
 	statusTTL   time.Duration
 
+	reqSeq int
+
 	spin spinner.Model
+}
+
+// nextGen returns an app-wide monotonic request generation. Views stamp
+// async requests with it so responses from destroyed view instances (e.g.
+// after an org switch) can never match a rebuilt view's expectation.
+func (m *Model) nextGen() int {
+	m.reqSeq++
+	return m.reqSeq
 }
 
 // New builds the root model.
@@ -197,17 +207,24 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case orgsLoadedMsg:
 		m.loadingOrgs = false
-		m.orgsErr = msg.err
-		if msg.err == nil {
-			m.orgs = msg.orgs
-			if ov, ok := m.views[ViewOrgs].(*orgsView); ok {
-				ov.setOrgs(msg.orgs)
-			} else {
-				m.currentView()
+		if msg.err != nil {
+			// A failed reload must not nuke a working session; the fatal
+			// screen is only for startup, before any orgs are known.
+			if len(m.orgs) > 0 {
+				return m, toast(statusError, "org reload failed: "+msg.err.Error())
 			}
-			if m.current == nil {
-				m.autoSelectOrg()
-			}
+			m.orgsErr = msg.err
+			return m, nil
+		}
+		m.orgsErr = nil
+		m.orgs = msg.orgs
+		if ov, ok := m.views[ViewOrgs].(*orgsView); ok {
+			ov.setOrgs(msg.orgs)
+		} else {
+			m.currentView()
+		}
+		if m.current == nil {
+			return m, m.autoSelectOrg()
 		}
 		return m, nil
 
@@ -264,21 +281,25 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, tea.Batch(cmds...)
 }
 
-func (m *Model) autoSelectOrg() {
+func (m *Model) autoSelectOrg() tea.Cmd {
 	if m.deps.InitialOrg != "" {
 		for _, o := range m.orgs {
 			if o.Alias == m.deps.InitialOrg || o.Username == m.deps.InitialOrg {
 				m.setOrg(o)
-				return
+				return nil
 			}
 		}
+		// An explicitly requested org that doesn't exist must not silently
+		// fall back — the user would act against the wrong org.
+		return toast(statusWarn, fmt.Sprintf("org %q not found — pick one below", m.deps.InitialOrg))
 	}
 	for _, o := range m.orgs {
 		if o.IsDefault {
 			m.setOrg(o)
-			return
+			return nil
 		}
 	}
+	return nil
 }
 
 func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -368,19 +389,19 @@ func (m *Model) centered(s string) string {
 
 func splashArt() string {
 	cloud := styleDim.Render("      .--.\n   .-(    ).\n  (___.__)__)")
-	return cloud + "   " + styleLogo.Render("sf9s") + "\n\n" +
+	return cloud + "   " + styleLogo.Render(" sf9s ") + "\n\n" +
 		styleDim.Render("  Salesforce orgs in your terminal")
 }
 
 func (m *Model) topBar() string {
-	left := styleLogo.Render("⚡ sf9s") + " "
+	left := styleLogo.Render(" ⚡ sf9s ") + " "
 	var tabs []string
 	for _, id := range viewOrder {
 		style := styleTab
 		if id == m.active {
 			style = styleTabOn
 		}
-		tabs = append(tabs, style.Render(viewNames[id]))
+		tabs = append(tabs, style.Render(" "+viewNames[id]+" "))
 	}
 	left += strings.Join(tabs, "")
 	version := styleVersion.Render(m.deps.Version + " ")

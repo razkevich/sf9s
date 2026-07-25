@@ -43,7 +43,7 @@ type deploysMsg struct {
 
 func (v *deploysView) Init() tea.Cmd {
 	v.loading = true
-	v.gen++
+	v.gen = v.app.nextGen()
 	gen := v.gen
 	client := v.app.client
 	return func() tea.Msg {

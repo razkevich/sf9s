@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -82,7 +83,7 @@ func (v *queryView) Capturing() bool {
 func (v *queryView) Init() tea.Cmd { return textarea.Blink }
 
 func (v *queryView) resetOrg() {
-	v.gen++
+	v.gen = v.app.nextGen()
 	v.running = false
 	v.result = nil
 	v.allRows = nil
@@ -114,7 +115,7 @@ func (v *queryView) runQuery() tea.Cmd {
 	if v.app.client == nil {
 		return toast(statusWarn, "select an org first")
 	}
-	v.gen++
+	v.gen = v.app.nextGen()
 	gen := v.gen
 	v.running = true
 	client := v.app.client
@@ -131,11 +132,18 @@ func (v *queryView) runQuery() tea.Cmd {
 	}
 }
 
+// maxAccumulatedRows bounds how much of a large result set sf9s holds in
+// memory; past this the user should narrow the query.
+const maxAccumulatedRows = 50000
+
 func (v *queryView) fetchMore() tea.Cmd {
 	if v.result == nil || v.result.NextRecordsURL == "" || v.running {
 		return nil
 	}
-	v.gen++
+	if len(v.allRows) >= maxAccumulatedRows {
+		return toast(statusWarn, fmt.Sprintf("row limit reached (%d) — narrow the query with WHERE or LIMIT", maxAccumulatedRows))
+	}
+	v.gen = v.app.nextGen()
 	gen := v.gen
 	v.running = true
 	client := v.app.client
@@ -164,12 +172,23 @@ func (v *queryView) Update(msg tea.Msg) tea.Cmd {
 		}
 		v.elapsed = msg.elapsed
 		if msg.more {
-			v.result.NextRecordsURL = msg.res.NextRecordsURL
-			v.result.Done = msg.res.Done
-			v.allRows = append(v.allRows, msg.res.Rows...)
-			v.fetched += len(msg.res.Rows)
-			v.table.AppendRows(msg.res.Rows)
-			return toast(statusOK, fmt.Sprintf("fetched %d more rows (%d/%d)", len(msg.res.Rows), v.fetched, v.result.TotalSize))
+			added := len(msg.res.Rows)
+			sameSchema := len(msg.res.Columns) == len(v.result.Columns)
+			for i := 0; sameSchema && i < len(msg.res.Columns); i++ {
+				sameSchema = msg.res.Columns[i] == v.result.Columns[i]
+			}
+			merged := api.Merge(v.result, msg.res)
+			v.result = merged
+			v.allRows = merged.Rows
+			v.fetched = len(merged.Rows)
+			if sameSchema {
+				v.table.AppendRows(msg.res.Rows)
+			} else {
+				// A later batch surfaced columns the first batch flattened
+				// away (null relationships); re-align the whole table.
+				v.table.SetData(merged.Columns, merged.Rows)
+			}
+			return toast(statusOK, fmt.Sprintf("fetched %d more rows (%d/%d)", added, v.fetched, v.result.TotalSize))
 		}
 		v.result = msg.res
 		v.allRows = msg.res.Rows
@@ -338,14 +357,40 @@ func (v *queryView) pickerKey(msg tea.KeyMsg) tea.Cmd {
 	return nil
 }
 
+// csvSafe neutralizes leading characters that spreadsheet apps execute as
+// formulas, so exported org data can't run on open.
+func csvSafe(s string) string {
+	if s == "" {
+		return s
+	}
+	switch s[0] {
+	case '=', '+', '-', '@', '\t', '\r':
+		return "'" + s
+	}
+	return s
+}
+
 func (v *queryView) export(format string) tea.Cmd {
 	if v.result == nil || len(v.allRows) == 0 {
 		return toast(statusWarn, "nothing to export")
 	}
-	name := fmt.Sprintf("sf9s-export-%s.%s", time.Now().Format("20060102-150405"), format)
-	cols, rows := v.result.Columns, v.allRows
+	cwd, err := os.Getwd()
+	if err != nil {
+		return toastErr(err)
+	}
+	name := filepath.Join(cwd, fmt.Sprintf("sf9s-export-%s.%s", time.Now().Format("20060102-150405"), format))
+	cols := v.result.Columns
+	rows := make([][]string, len(v.allRows))
+	for i, row := range v.allRows {
+		clean := make([]string, len(row))
+		for j, cell := range row {
+			clean[j] = sanitizeCell(cell)
+		}
+		rows[i] = clean
+	}
 	return func() tea.Msg {
-		f, err := os.Create(name)
+		// O_EXCL so a pre-planted symlink or file can never be followed.
+		f, err := os.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 		if err != nil {
 			return statusMsg{kind: statusError, text: err.Error()}
 		}
@@ -356,8 +401,16 @@ func (v *queryView) export(format string) tea.Cmd {
 				if err := w.Write(cols); err != nil {
 					return err
 				}
+				safe := make([]string, len(cols))
 				for _, row := range rows {
-					if err := w.Write(row); err != nil {
+					for j := range safe {
+						if j < len(row) {
+							safe[j] = csvSafe(row[j])
+						} else {
+							safe[j] = ""
+						}
+					}
+					if err := w.Write(safe); err != nil {
 						return err
 					}
 				}
@@ -419,13 +472,17 @@ func (v *queryView) View(width, height int) string {
 		}
 	}
 
+	// Shrink the editor before sacrificing result rows on short terminals:
+	// head(1) + editor(edH+2) + resultHead(1) + table(>=3) must fit height.
+	edH := min(editorHeight, max(1, height-7))
+	v.editor.SetHeight(edH)
 	editorBox := styleEditorBlurred
 	if !v.focusResults {
 		editorBox = styleEditorFocused
 	}
 	editor := editorBox.Width(width - 2).Render(v.editor.View())
 
-	tableH := height - editorHeight - 5
+	tableH := max(height-edH-4, 3)
 	v.table.SetSize(width, tableH)
 	return head + "\n" + editor + "\n" + resultHead + "\n" + v.table.View()
 }

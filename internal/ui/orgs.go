@@ -85,13 +85,7 @@ func (v *orgsView) Update(msg tea.Msg) tea.Cmd {
 				return func() tea.Msg { return useOrgMsg{org: *org, jump: msg.String() == "enter"} }
 			}
 		case "o":
-			return v.withCreds("opening browser…", func(token, instanceURL string) statusMsg {
-				url := instanceURL + "/secur/frontdoor.jsp?sid=" + token
-				if err := v.app.deps.OpenURL(url); err != nil {
-					return statusMsg{kind: statusError, text: err.Error()}
-				}
-				return statusMsg{kind: statusOK, text: "opened in browser"}
-			})
+			return v.openOrg()
 		case "y":
 			return v.withCreds("fetching token…", func(token, _ string) statusMsg {
 				if err := v.app.deps.Clipboard(token); err != nil {
@@ -107,18 +101,43 @@ func (v *orgsView) Update(msg tea.Msg) tea.Cmd {
 				return toast(statusOK, "instance URL copied to clipboard")
 			}
 		case "R":
-			v.app.loadingOrgs = true
-			return v.app.loadOrgs()
+			if v.busy {
+				return nil
+			}
+			return tea.Batch(toast(statusInfo, "reloading orgs…"), v.app.loadOrgs())
 		}
 	}
 	return nil
+}
+
+// openOrg delegates to `sf org open` so the session token never passes
+// through sf9s' process arguments or a URL we build.
+func (v *orgsView) openOrg() tea.Cmd {
+	org := v.selected()
+	if org == nil || v.busy {
+		return nil
+	}
+	v.busy = true
+	sf := v.app.deps.SF
+	username := org.Username
+	return tea.Batch(
+		toast(statusInfo, "opening "+org.Title()+" in your browser…"),
+		func() tea.Msg {
+			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+			defer cancel()
+			if err := sf.OpenOrg(ctx, username); err != nil {
+				return orgActionMsg{toast: statusMsg{kind: statusError, text: err.Error()}}
+			}
+			return orgActionMsg{toast: statusMsg{kind: statusOK, text: "opened in browser"}}
+		},
+	)
 }
 
 // withCreds resolves fresh credentials for the selected org off the UI
 // thread, then applies fn and reports its toast.
 func (v *orgsView) withCreds(pending string, fn func(token, instanceURL string) statusMsg) tea.Cmd {
 	org := v.selected()
-	if org == nil {
+	if org == nil || v.busy {
 		return nil
 	}
 	v.busy = true

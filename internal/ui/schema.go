@@ -38,7 +38,7 @@ func (v *schemaView) Hints() string {
 	if v.inFields {
 		return "y copy field • c build query • esc back • / filter"
 	}
-	return "enter fields • y copy name • c build query • / filter"
+	return "enter fields • y copy name • c build query • R reload • / filter"
 }
 
 func (v *schemaView) Capturing() bool {
@@ -67,8 +67,12 @@ func (v *schemaView) Init() tea.Cmd {
 		v.setObjects(cached)
 		return nil
 	}
+	return v.fetchObjects()
+}
+
+func (v *schemaView) fetchObjects() tea.Cmd {
 	v.loading = true
-	v.gen++
+	v.gen = v.app.nextGen()
 	gen := v.gen
 	client := v.app.client
 	store := v.app.deps.Store
@@ -108,7 +112,7 @@ func (v *schemaView) loadDescribe(name string) tea.Cmd {
 		return nil
 	}
 	v.loading = true
-	v.gen++
+	v.gen = v.app.nextGen()
 	gen := v.gen
 	client := v.app.client
 	store := v.app.deps.Store
@@ -225,6 +229,10 @@ func (v *schemaView) Update(msg tea.Msg) tea.Cmd {
 				return nil
 			}
 			return goBack
+		case "R":
+			if !v.inFields && !v.loading {
+				return v.fetchObjects()
+			}
 		case "y":
 			cell := v.objTable.Cell("API Name")
 			what := "object"

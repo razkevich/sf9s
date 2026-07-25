@@ -22,11 +22,17 @@ func main() {
 			{"fullName":"InvoiceService","type":"ApexClass","lastModifiedByName":"Alex","lastModifiedDate":"2026-07-01T10:00:00.000Z","createdByName":"Alex","createdDate":"2026-01-01T10:00:00.000Z","manageableState":"unmanaged"},
 			{"fullName":"PaymentService","type":"ApexClass","lastModifiedByName":"Dana","lastModifiedDate":"2026-07-02T10:00:00.000Z","createdByName":"Dana","createdDate":"2026-01-02T10:00:00.000Z","manageableState":"unmanaged"}]}`)
 	case strings.HasPrefix(args, "org list"):
+		display := func(host string) string {
+			if os.Getenv("SF9S_PRETTY_URLS") == "1" {
+				return "https://" + host
+			}
+			return mock
+		}
 		fmt.Printf(`{"status":0,"result":{"nonScratchOrgs":[
 			{"username":"e2e@example.com","alias":"e2e","orgId":"00DE2E","instanceUrl":%q,"connectedStatus":"Connected","isDefaultUsername":true},
-			{"username":"other@example.com","alias":"other","orgId":"00DOTH","instanceUrl":%q,"connectedStatus":"Connected"}],
+			{"username":"other@example.com","alias":"other","orgId":"00DOTH","instanceUrl":%q,"connectedStatus":"Connected","isSandbox":true}],
 			"scratchOrgs":[{"username":"scratchy@example.com","alias":"scratchy","orgId":"00DSCR","instanceUrl":%q,"status":"Active","expirationDate":"2026-08-15"}]}}`,
-			mock, mock, mock)
+			display("acme.my.salesforce.com"), display("acme--staging.sandbox.my.salesforce.com"), display("nimble-fox-8f2k.scratch.my.salesforce.com"))
 	case strings.HasPrefix(args, "org display"):
 		fmt.Printf(`{"status":0,"result":{"id":"00DE2E","accessToken":"E2E_TOKEN","instanceUrl":%q,"apiVersion":"64.0","username":"e2e@example.com","connectedStatus":"Connected"}}`, mock)
 	default:

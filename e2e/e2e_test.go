@@ -138,7 +138,7 @@ func TestJourneyOrgsQueryExport(t *testing.T) {
 
 	// Export CSV lands in the working directory with flattened headers.
 	h.typeString("e")
-	h.waitFor(t, "exported sf9s-export-")
+	h.waitFor(t, "exported ")
 	entries, err := filepath.Glob("sf9s-export-*.csv")
 	if err != nil || len(entries) != 1 {
 		t.Fatalf("expected one export file, got %v (%v)", entries, err)

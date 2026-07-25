@@ -18,10 +18,10 @@ var (
 	colorErr      = lipgloss.AdaptiveColor{Light: "#CF222E", Dark: "#F85149"}
 
 	styleLogo = lipgloss.NewStyle().Bold(true).
-			Foreground(colorOnAccent).Background(colorAccent).Padding(0, 1)
+			Foreground(colorOnAccent).Background(colorAccent)
 	styleVersion = lipgloss.NewStyle().Foreground(colorDim)
-	styleTab     = lipgloss.NewStyle().Foreground(colorDim).Padding(0, 1)
-	styleTabOn   = lipgloss.NewStyle().Foreground(colorAccent).Bold(true).Padding(0, 1).Underline(true)
+	styleTab     = lipgloss.NewStyle().Foreground(colorDim)
+	styleTabOn   = lipgloss.NewStyle().Foreground(colorOnAccent).Background(colorAccent).Bold(true)
 
 	styleBand      = lipgloss.NewStyle().Background(colorBand)
 	styleStatusOrg = lipgloss.NewStyle().Bold(true).Foreground(colorAccent).Background(colorBand)

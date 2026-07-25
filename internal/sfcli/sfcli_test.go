@@ -153,6 +153,28 @@ func TestListMetadataArrayAndSingle(t *testing.T) {
 	}
 }
 
+func TestFlagLikeArgumentsRejected(t *testing.T) {
+	c := New(fakeRunner{out: map[string][]byte{}})
+	if _, err := c.Credentials(context.Background(), "--output-file=/tmp/x"); err == nil {
+		t.Error("flag-like org alias must be rejected before reaching sf")
+	}
+	if _, err := c.ListMetadata(context.Background(), "qa", "--output-file=/tmp/x"); err == nil {
+		t.Error("flag-like metadata type must be rejected")
+	}
+	if _, err := c.MetadataTypes(context.Background(), ""); err == nil {
+		t.Error("empty org must be rejected")
+	}
+}
+
+func TestContextCancellationReportedAsTimeout(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := ExecRunner{Bin: "sleep"}.Run(ctx, "5")
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("want context.Canceled, got %v", err)
+	}
+}
+
 func TestUnwrapGarbage(t *testing.T) {
 	c := New(fakeRunner{out: map[string][]byte{"org list": []byte("not json at all")}})
 	if _, err := c.Orgs(context.Background()); err == nil {

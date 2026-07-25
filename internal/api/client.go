@@ -5,14 +5,16 @@ package api
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
-	"time"
 )
 
 // Credentials is the token material needed to call an org.
@@ -48,11 +50,46 @@ type Client struct {
 	tokens TokenSource
 }
 
+// NewClient builds a client whose requests are bounded solely by the
+// caller's context — a client-level Timeout would silently cap long log
+// downloads and queries below the deadlines the UI actually sets. Redirects
+// are refused so a bearer token can never follow one off the instance host.
 func NewClient(tokens TokenSource) *Client {
 	return &Client{
-		hc:     &http.Client{Timeout: 30 * time.Second},
+		hc: &http.Client{
+			Transport: &http.Transport{TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12}},
+			CheckRedirect: func(req *http.Request, via []*http.Request) error {
+				return fmt.Errorf("refusing redirect to %s", req.URL.Host)
+			},
+		},
 		tokens: tokens,
 	}
+}
+
+// allowPlaintext permits http:// instance URLs, needed only for local org
+// emulators and tests. Set via SF9S_ALLOW_HTTP=1.
+var allowPlaintext = os.Getenv("SF9S_ALLOW_HTTP") == "1"
+
+func checkInstanceURL(raw string) error {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return fmt.Errorf("invalid instance URL %q: %w", raw, err)
+	}
+	if u.Scheme == "https" {
+		return nil
+	}
+	if u.Scheme == "http" && (allowPlaintext || isLoopback(u.Hostname())) {
+		return nil
+	}
+	return fmt.Errorf("refusing to send credentials to %s over %s (set SF9S_ALLOW_HTTP=1 for local emulators)", u.Host, u.Scheme)
+}
+
+func isLoopback(host string) bool {
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 func versionPath(creds Credentials) string {
@@ -102,6 +139,9 @@ func (c *Client) raw(ctx context.Context, method, path string) (io.ReadCloser, e
 func (c *Client) roundTrip(ctx context.Context, method, path string, forceToken bool) (*http.Response, error) {
 	creds, err := c.tokens.Credentials(ctx, forceToken)
 	if err != nil {
+		return nil, err
+	}
+	if err := checkInstanceURL(creds.InstanceURL); err != nil {
 		return nil, err
 	}
 	full := path

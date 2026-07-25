@@ -46,6 +46,7 @@ func newPalette() *palette {
 
 func (p *palette) Open() {
 	p.open = true
+	p.cursor = 0
 	p.input.SetValue("")
 	p.input.Focus()
 	p.refilter()

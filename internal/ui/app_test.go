@@ -300,6 +300,68 @@ func TestOrgGuardOnViews(t *testing.T) {
 	}
 }
 
+func TestStaleCrossOrgResponseIgnored(t *testing.T) {
+	srv := testServer(t)
+	m := newTestModel(t, srv.URL)
+	drive(t, m, m.loadOrgs()())
+
+	drive(t, m, switchViewMsg{id: ViewLogs})
+	oldView := m.views[ViewLogs].(*logsView)
+	staleGen := oldView.gen
+
+	// Org switch destroys the view; the rebuilt one must reject responses
+	// stamped with the old instance's generation.
+	m.setOrg(sfcli.Org{Username: "someone@else.com", OrgID: "00D9"})
+	drive(t, m, switchViewMsg{id: ViewLogs})
+	newView := m.views[ViewLogs].(*logsView)
+	if newView == oldView {
+		t.Fatal("org switch should rebuild the logs view")
+	}
+	if newView.gen == staleGen {
+		t.Fatal("rebuilt view must get a fresh app-wide generation")
+	}
+	rows := newView.table.RowCount()
+	drive(t, m, logsListMsg{gen: staleGen, res: &api.Result{
+		TotalSize: 1, Columns: []string{"Id"}, Rows: [][]string{{"STALE"}},
+	}})
+	if newView.table.RowCount() != rows || newView.table.Cell("Id") == "STALE" {
+		t.Fatal("stale cross-org response must be discarded")
+	}
+}
+
+func TestOrgReloadFailureKeepsSession(t *testing.T) {
+	srv := testServer(t)
+	m := newTestModel(t, srv.URL)
+	drive(t, m, m.loadOrgs()())
+	if m.current == nil {
+		t.Fatal("precondition: org selected")
+	}
+	drive(t, m, orgsLoadedMsg{err: context.DeadlineExceeded})
+	view := m.View()
+	if strings.Contains(view, "Could not list orgs") {
+		t.Fatalf("reload failure must not show the fatal startup screen:\n%s", view)
+	}
+	if !strings.Contains(view, "org reload failed") {
+		t.Fatalf("reload failure should surface as a toast:\n%s", view)
+	}
+	if !strings.Contains(view, "prod") {
+		t.Fatalf("org table must survive a failed reload:\n%s", view)
+	}
+}
+
+func TestInitialOrgTypoDoesNotFallBack(t *testing.T) {
+	srv := testServer(t)
+	m := newTestModel(t, srv.URL)
+	m.deps.InitialOrg = "porduction"
+	drive(t, m, m.loadOrgs()())
+	if m.current != nil {
+		t.Fatalf("a typo'd -o value must not silently select %q", m.current.Title())
+	}
+	if !strings.Contains(m.View(), `org "porduction" not found`) {
+		t.Fatalf("expected not-found warning:\n%s", m.View())
+	}
+}
+
 func TestHelpOverlay(t *testing.T) {
 	srv := testServer(t)
 	m := newTestModel(t, srv.URL)

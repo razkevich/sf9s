@@ -22,11 +22,11 @@ type logsView struct {
 	loading bool
 	gen     int
 
-	inBody    bool
-	body      string
-	bodyLines []string
-	bodyID    string
-	vp        viewport.Model
+	inBody     bool
+	bodyLines  []string
+	lowerLines []string
+	bodyID     string
+	vp         viewport.Model
 
 	searching  bool
 	searchTerm string
@@ -57,7 +57,7 @@ func (v *logsView) Hints() string {
 }
 
 func (v *logsView) Capturing() bool {
-	return v.table.Filtering() || v.searching || v.confirmDelete
+	return v.table.Filtering() || v.searching || v.confirmDelete || v.inBody
 }
 
 type logsListMsg struct {
@@ -80,7 +80,7 @@ type logDeletedMsg struct {
 
 func (v *logsView) Init() tea.Cmd {
 	v.loading = true
-	v.gen++
+	v.gen = v.app.nextGen()
 	gen := v.gen
 	client := v.app.client
 	return func() tea.Msg {
@@ -93,7 +93,7 @@ func (v *logsView) Init() tea.Cmd {
 
 func (v *logsView) openBody(id string) tea.Cmd {
 	v.loading = true
-	v.gen++
+	v.gen = v.app.nextGen()
 	gen := v.gen
 	client := v.app.client
 	return func() tea.Msg {
@@ -106,7 +106,7 @@ func (v *logsView) openBody(id string) tea.Cmd {
 
 func (v *logsView) deleteLog(id string) tea.Cmd {
 	v.loading = true
-	v.gen++
+	v.gen = v.app.nextGen()
 	gen := v.gen
 	client := v.app.client
 	return func() tea.Msg {
@@ -139,14 +139,18 @@ func (v *logsView) Update(msg tea.Msg) tea.Cmd {
 		if msg.err != nil {
 			return toastErr(msg.err)
 		}
-		v.body = msg.body
 		v.bodyID = msg.id
-		v.bodyLines = strings.Split(msg.body, "\n")
+		body := sanitizeText(msg.body)
+		v.bodyLines = strings.Split(body, "\n")
+		v.lowerLines = make([]string, len(v.bodyLines))
+		for i, line := range v.bodyLines {
+			v.lowerLines[i] = strings.ToLower(line)
+		}
 		v.inBody = true
 		v.searchTerm = ""
 		v.matches = nil
 		v.vp = viewport.New(v.app.width, v.app.height-4)
-		v.vp.SetContent(v.body)
+		v.vp.SetContent(body)
 		return nil
 
 	case logDeletedMsg:
@@ -206,6 +210,8 @@ func (v *logsView) bodyKey(msg tea.KeyMsg) tea.Cmd {
 		case tea.KeyEsc:
 			v.searching = false
 			v.searchTerm = ""
+			v.matches = nil
+			v.matchIdx = -1
 		case tea.KeyEnter:
 			v.searching = false
 			return v.runSearch()
@@ -242,8 +248,8 @@ func (v *logsView) runSearch() tea.Cmd {
 	if needle == "" {
 		return nil
 	}
-	for i, line := range v.bodyLines {
-		if strings.Contains(strings.ToLower(line), needle) {
+	for i, line := range v.lowerLines {
+		if strings.Contains(line, needle) {
 			v.matches = append(v.matches, i)
 		}
 	}

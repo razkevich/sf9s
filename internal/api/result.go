@@ -36,7 +36,7 @@ func buildResult(payload queryResponse) (*Result, error) {
 	rowMaps := make([]map[string]string, 0, len(payload.Records))
 	for _, raw := range payload.Records {
 		cells := map[string]string{}
-		err := flattenRecord(raw, "", func(path, val string) {
+		err := flattenRecord(raw, "", 0, func(path, val string) {
 			if _, ok := colIndex[path]; !ok {
 				colIndex[path] = len(res.Columns)
 				res.Columns = append(res.Columns, path)
@@ -66,6 +66,38 @@ func buildResult(payload queryResponse) (*Result, error) {
 	return res, nil
 }
 
+// Merge combines a base result with a follow-up page whose column schema
+// may differ (null relationships flatten differently per batch). Columns
+// become the ordered union; every row is re-aligned to it.
+func Merge(base, next *Result) *Result {
+	merged := &Result{
+		TotalSize:      base.TotalSize,
+		Done:           next.Done,
+		NextRecordsURL: next.NextRecordsURL,
+	}
+	colIndex := map[string]int{}
+	for _, col := range append(append([]string{}, base.Columns...), next.Columns...) {
+		if _, ok := colIndex[col]; !ok {
+			colIndex[col] = len(merged.Columns)
+			merged.Columns = append(merged.Columns, col)
+		}
+	}
+	realign := func(cols []string, rows [][]string) {
+		for _, row := range rows {
+			out := make([]string, len(merged.Columns))
+			for i, col := range cols {
+				if i < len(row) {
+					out[colIndex[col]] = row[i]
+				}
+			}
+			merged.Rows = append(merged.Rows, out)
+		}
+	}
+	realign(base.Columns, base.Rows)
+	realign(next.Columns, next.Rows)
+	return merged
+}
+
 // dropNullParentColumns removes a bare relationship column (produced by rows
 // where the parent record is null) when dot-path child columns exist for it
 // and the bare column holds no data of its own.
@@ -79,7 +111,7 @@ func dropNullParentColumns(columns []string, rowMaps []map[string]string) []stri
 		}
 		return false
 	}
-	kept := columns[:0]
+	kept := make([]string, 0, len(columns))
 	for _, col := range columns {
 		if hasChildren(col) {
 			empty := true
@@ -98,10 +130,24 @@ func dropNullParentColumns(columns []string, rowMaps []map[string]string) []stri
 	return kept
 }
 
-func flattenRecord(raw json.RawMessage, prefix string, add func(path, val string)) error {
+// maxFlattenDepth bounds relationship nesting. Salesforce allows five levels
+// up; the cap exists so a pathological response can't drive quadratic
+// re-decoding of the record tree.
+const maxFlattenDepth = 24
+
+func flattenRecord(raw json.RawMessage, prefix string, depth int, add func(path, val string)) error {
 	keys, vals, err := objectEntries(raw)
 	if err != nil {
 		return err
+	}
+	return flattenEntries(keys, vals, prefix, depth, add)
+}
+
+// flattenEntries walks already-decoded object entries, so a nested record is
+// never decoded twice (once to test for a subquery, once to recurse).
+func flattenEntries(keys []string, vals []json.RawMessage, prefix string, depth int, add func(path, val string)) error {
+	if depth > maxFlattenDepth {
+		return fmt.Errorf("record nesting deeper than %d levels", maxFlattenDepth)
 	}
 	for i, key := range keys {
 		if key == "attributes" {
@@ -121,7 +167,7 @@ func flattenRecord(raw json.RawMessage, prefix string, add func(path, val string
 				add(path, fmt.Sprintf("(%d rows)", n))
 				continue
 			}
-			if err := flattenRecord(val, path+".", add); err != nil {
+			if err := flattenEntries(subKeys, subVals, path+".", depth+1, add); err != nil {
 				return err
 			}
 		case val[0] == '"':
