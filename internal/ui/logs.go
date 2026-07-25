@@ -34,10 +34,19 @@ type logsView struct {
 	matchIdx   int
 
 	confirmDelete bool
+
+	tailing  bool
+	seen     map[string]bool
+	tailGen  int
+	newestID string
 }
 
+// tailInterval paces the ApexLog poll. The Tooling API offers no streaming
+// for debug logs, so tailing means polling; 2s matches `sf apex tail`.
+const tailInterval = 2 * time.Second
+
 func newLogsView(app *Model) *logsView {
-	v := &logsView{app: app, table: newDataTable()}
+	v := &logsView{app: app, table: newDataTable(), seen: map[string]bool{}}
 	v.table.emptyText = "no apex logs — enable debug logging in Setup or via sf apex log"
 	v.table.SetCellStyle("Status", statusCellStyle)
 	return v
@@ -51,8 +60,10 @@ func (v *logsView) Hints() string {
 		return "delete this log? y / n"
 	case v.inBody:
 		return "/ search • n/N next/prev match • esc back"
+	case v.tailing:
+		return "TAILING • t stop • enter open • / filter"
 	default:
-		return "enter open • d delete • R refresh • / filter"
+		return "enter open • t tail • d delete • R refresh • / filter"
 	}
 }
 
@@ -75,6 +86,16 @@ type logBodyMsg struct {
 
 type logDeletedMsg struct {
 	gen int
+	err error
+}
+
+// tailTickMsg drives one poll of a tail session; gen identifies the session
+// so a stopped or restarted tail can't keep polling.
+type tailTickMsg struct{ gen int }
+
+type tailResultMsg struct {
+	gen int
+	res *api.Result
 	err error
 }
 
@@ -129,7 +150,29 @@ func (v *logsView) Update(msg tea.Msg) tea.Cmd {
 		}
 		v.result = msg.res
 		v.table.SetData(msg.res.Columns, msg.res.Rows)
+		v.rememberIDs(msg.res)
 		return nil
+
+	case tailTickMsg:
+		if !v.tailing || msg.gen != v.tailGen {
+			return nil
+		}
+		return v.pollTail(msg.gen)
+
+	case tailResultMsg:
+		if !v.tailing || msg.gen != v.tailGen {
+			return nil
+		}
+		if msg.err != nil {
+			v.tailing = false
+			return toast(statusError, "tail stopped: "+msg.err.Error())
+		}
+		fresh := v.mergeTail(msg.res)
+		cmds := []tea.Cmd{v.scheduleTail(msg.gen)}
+		if fresh > 0 {
+			cmds = append(cmds, toast(statusOK, fmt.Sprintf("%d new log(s)", fresh)))
+		}
+		return tea.Batch(cmds...)
 
 	case logBodyMsg:
 		if msg.gen != v.gen {
@@ -196,12 +239,121 @@ func (v *logsView) handleKey(msg tea.KeyMsg) tea.Cmd {
 		if v.table.CurrentRow() != nil {
 			v.confirmDelete = true
 		}
+	case "t":
+		return v.toggleTail()
 	case "R":
+		v.stopTail()
 		return v.Init()
 	case "esc":
+		v.stopTail()
 		return goBack
 	}
 	return nil
+}
+
+// toggleTail starts or stops polling for new debug logs.
+func (v *logsView) toggleTail() tea.Cmd {
+	if v.tailing {
+		v.stopTail()
+		return toast(statusInfo, "tail stopped")
+	}
+	if v.app.client == nil {
+		return toast(statusWarn, "select an org first")
+	}
+	v.tailing = true
+	v.tailGen = v.app.nextGen()
+	return tea.Batch(
+		toast(statusOK, "tailing apex logs — press t to stop"),
+		v.pollTail(v.tailGen),
+	)
+}
+
+// stopTail ends the session; in-flight polls are discarded by generation.
+func (v *logsView) stopTail() {
+	v.tailing = false
+	v.tailGen = 0
+}
+
+func (v *logsView) scheduleTail(gen int) tea.Cmd {
+	return tea.Tick(tailInterval, func(time.Time) tea.Msg { return tailTickMsg{gen: gen} })
+}
+
+func (v *logsView) pollTail(gen int) tea.Cmd {
+	client := v.app.client
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		res, err := client.Query(ctx, logsSOQL, true)
+		return tailResultMsg{gen: gen, res: res, err: err}
+	}
+}
+
+// rememberIDs marks every log currently listed as already seen, so a tail
+// started later only flags what arrives after it.
+func (v *logsView) rememberIDs(res *api.Result) {
+	for _, id := range idsOf(res) {
+		v.seen[id] = true
+	}
+}
+
+func idsOf(res *api.Result) []string {
+	if res == nil {
+		return nil
+	}
+	col := -1
+	for i, c := range res.Columns {
+		if c == "Id" {
+			col = i
+			break
+		}
+	}
+	if col < 0 {
+		return nil
+	}
+	ids := make([]string, 0, len(res.Rows))
+	for _, row := range res.Rows {
+		if col < len(row) {
+			ids = append(ids, row[col])
+		}
+	}
+	return ids
+}
+
+// mergeTail prepends logs not seen before and returns how many were new.
+func (v *logsView) mergeTail(res *api.Result) int {
+	if res == nil || len(res.Rows) == 0 {
+		return 0
+	}
+	ids := idsOf(res)
+	var freshRows [][]string
+	for i, row := range res.Rows {
+		if i < len(ids) && v.seen[ids[i]] {
+			continue
+		}
+		if i < len(ids) {
+			v.seen[ids[i]] = true
+		}
+		freshRows = append(freshRows, row)
+	}
+	if len(freshRows) == 0 {
+		return 0
+	}
+	if v.result == nil {
+		v.result = res
+		v.table.SetData(res.Columns, res.Rows)
+		return len(freshRows)
+	}
+	// Newest first: the fresh rows go on top of what is already listed.
+	combined := append(append([][]string{}, freshRows...), v.result.Rows...)
+	v.result = &api.Result{
+		TotalSize: res.TotalSize,
+		Done:      res.Done,
+		Columns:   res.Columns,
+		Rows:      combined,
+	}
+	v.table.SetDataPreservingView(res.Columns, combined)
+	v.newestID = ids[0]
+	return len(freshRows)
 }
 
 func (v *logsView) bodyKey(msg tea.KeyMsg) tea.Cmd {
@@ -281,6 +433,9 @@ func (v *logsView) View(width, height int) string {
 	}
 
 	head := styleTitle.Render("Apex debug logs")
+	if v.tailing {
+		head += "  " + v.app.spin.View() + styleOK.Render(" tailing")
+	}
 	if v.loading {
 		head += "  " + v.app.spin.View() + styleDim.Render(" loading…")
 	} else if v.result != nil {

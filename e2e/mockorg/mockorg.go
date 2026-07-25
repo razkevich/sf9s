@@ -17,6 +17,21 @@ type Server struct {
 	Requests    atomic.Int64
 	FailQueries atomic.Bool
 	DeletedLogs []string
+	// ExtraLogID, when set, is returned as an additional (newer) ApexLog so
+	// tests can simulate a log arriving mid-session.
+	ExtraLogID atomic.Value
+}
+
+// AddLog makes the emulator report one more, newer ApexLog.
+func (s *Server) AddLog(id string) { s.ExtraLogID.Store(id) }
+
+func (s *Server) apexLogRecords() string {
+	existing := `{"attributes":{"type":"ApexLog"},"Id":"07LE2E0000001","LogUser":{"attributes":{"type":"Name"},"Name":"Alex"},"Operation":"/apex/execute","Status":"Success","LogLength":128,"StartTime":"2026-07-25T10:00:00.000+0000","DurationMilliseconds":42,"Request":"Api","Application":"Unknown"}`
+	if id, ok := s.ExtraLogID.Load().(string); ok && id != "" {
+		newer := fmt.Sprintf(`{"attributes":{"type":"ApexLog"},"Id":%q,"LogUser":{"attributes":{"type":"Name"},"Name":"Dana"},"Operation":"/apex/trigger","Status":"Success","LogLength":256,"StartTime":"2026-07-25T11:00:00.000+0000","DurationMilliseconds":88,"Request":"Api","Application":"Unknown"}`, id)
+		return newer + "," + existing
+	}
+	return existing
 }
 
 func firstWord(q string) string {
@@ -70,8 +85,9 @@ func New() *Server {
 		q := r.URL.Query().Get("q")
 		switch {
 		case strings.Contains(q, "FROM ApexLog"):
-			fmt.Fprint(w, `{"totalSize":1,"done":true,"records":[
-				{"attributes":{"type":"ApexLog"},"Id":"07LE2E0000001","LogUser":{"attributes":{"type":"Name"},"Name":"Alex"},"Operation":"/apex/execute","Status":"Success","LogLength":128,"StartTime":"2026-07-25T10:00:00.000+0000","DurationMilliseconds":42,"Request":"Api","Application":"Unknown"}]}`)
+			records := s.apexLogRecords()
+			fmt.Fprintf(w, `{"totalSize":%d,"done":true,"records":[%s]}`,
+				strings.Count(records, `"attributes"`), records)
 		case strings.Contains(q, "FROM DeployRequest"):
 			fmt.Fprint(w, `{"totalSize":1,"done":true,"records":[
 				{"attributes":{"type":"DeployRequest"},"Id":"0AfE2E0000001","Status":"Succeeded","CreatedBy":{"attributes":{"type":"Name"},"Name":"Alex"},"CreatedDate":"2026-07-24T13:41:15.000+0000","StartDate":"2026-07-24T13:41:16.000+0000","CompletedDate":"2026-07-24T13:41:16.000+0000","CheckOnly":false,"NumberComponentsDeployed":3,"NumberComponentsTotal":3,"NumberComponentErrors":0,"NumberTestsCompleted":0,"NumberTestsTotal":0,"NumberTestErrors":0,"ErrorMessage":null}]}`)

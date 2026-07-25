@@ -76,6 +76,7 @@ var viewHelp = map[ViewID][][2]string{
 	},
 	ViewLogs: {
 		{"enter", "open log body"},
+		{"t", "tail: poll for new logs every 2s"},
 		{"d", "delete log (confirms)"},
 		{"R", "refresh"},
 		{"/ n N (in log)", "search / next / previous match"},

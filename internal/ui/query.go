@@ -366,6 +366,16 @@ func (v *queryView) setEditorTextWithCursor(text string, offset int) {
 
 func (v *queryView) handleKey(msg tea.KeyMsg) tea.Cmd {
 	if v.card != nil {
+		if msg.String() == "y" {
+			raw, err := v.card.JSON()
+			if err != nil {
+				return toastErr(err)
+			}
+			if err := v.app.deps.Clipboard(raw); err != nil {
+				return toastErr(err)
+			}
+			return toast(statusOK, "copied record as JSON")
+		}
 		if !v.card.Update(msg) {
 			v.card = nil
 		}

@@ -195,6 +195,11 @@ func (m *Model) setOrg(org sfcli.Org) {
 	o := org
 	m.current = &o
 	m.client = m.deps.NewAPI(org.Username)
+	// Stop background polling before discarding its view, so nothing keeps
+	// querying the org we just left.
+	if lv, ok := m.views[ViewLogs].(*logsView); ok {
+		lv.stopTail()
+	}
 	for id := range m.views {
 		if id != ViewOrgs && id != ViewQuery {
 			delete(m.views, id)
@@ -208,6 +213,9 @@ func (m *Model) setOrg(org sfcli.Org) {
 func (m *Model) navigate(id ViewID) tea.Cmd {
 	if id != ViewOrgs && m.current == nil {
 		return toast(statusWarn, "select an org first (enter on the orgs view)")
+	}
+	if lv, ok := m.views[ViewLogs].(*logsView); ok && id != ViewLogs {
+		lv.stopTail()
 	}
 	m.active = id
 	_, existed := m.views[id]

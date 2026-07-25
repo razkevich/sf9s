@@ -16,6 +16,10 @@ linters:
       exclude-functions:
         - (io.Closer).Close
         - (net/http.ResponseWriter).Write
+        # Writing usage text to a stream we do not own; a failure there is
+        # already the caller's problem and there is nowhere to report it.
+        - fmt.Fprintf
+        - fmt.Fprintln
     revive:
       rules:
         - name: unused-parameter

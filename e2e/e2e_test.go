@@ -261,6 +261,48 @@ func TestJourneyApexLogSearchAndDelete(t *testing.T) {
 	h.quit(t)
 }
 
+func TestJourneyApexLogTail(t *testing.T) {
+	h := start(t)
+	h.waitFor(t, "Authenticated orgs (3)")
+	h.key(tea.KeyEnter)
+	h.waitFor(t, "SOQL")
+	h.key(tea.KeyEsc)
+	h.waitFor(t, "Authenticated orgs")
+
+	h.palette("logs")
+	h.waitFor(t, "/apex/execute")
+
+	h.typeString("t")
+	h.waitFor(t, "tailing apex logs")
+
+	// A log shows up in the org while we are watching.
+	h.org.AddLog("07LNEWLOG0001")
+	h.waitFor(t, "07LNEWLOG0001", "/apex/trigger", "new log(s)")
+
+	h.typeString("t")
+	h.waitFor(t, "tail stopped")
+	h.quit(t)
+}
+
+func TestJourneyCopyRecordFromCard(t *testing.T) {
+	h := start(t)
+	h.waitFor(t, "Authenticated orgs (3)")
+	h.key(tea.KeyEnter)
+	h.typeString("SELECT Id, Name FROM Account")
+	h.key(tea.KeyCtrlR)
+	h.waitFor(t, "Acme Rockets")
+
+	h.key(tea.KeyEnter) // open the record card
+	h.waitFor(t, "y copy JSON")
+	h.typeString("y")
+	h.waitFor(t, "copied record as JSON")
+	last := (*h.copied)[len(*h.copied)-1]
+	if !strings.Contains(last, `"Name": "Acme Rockets"`) {
+		t.Fatalf("card copy should hold the record JSON, got %q", last)
+	}
+	h.quit(t)
+}
+
 func TestJourneyMetadataBrowser(t *testing.T) {
 	h := start(t)
 	h.waitFor(t, "Authenticated orgs (3)")

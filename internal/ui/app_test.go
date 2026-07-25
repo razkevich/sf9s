@@ -39,6 +39,10 @@ func testServer(t *testing.T) *httptest.Server {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
+		case r.URL.Path == "/services/data/v64.0/tooling/query":
+			// Apex logs / deploy requests: empty by default, so a tail poll
+			// succeeds and tests inject their own results.
+			w.Write([]byte(`{"totalSize":0,"done":true,"records":[]}`))
 		case strings.HasPrefix(r.URL.Path, "/services/data/v64.0/query"):
 			w.Write([]byte(`{"totalSize":2,"done":true,"records":[
 				{"attributes":{"type":"Account"},"Id":"001A","Name":"Acme"},
@@ -133,9 +137,10 @@ func expand(msg tea.Msg) []tea.Msg {
 		return nil
 	}
 	// Drop self-perpetuating timer messages (status clears, spinner ticks,
-	// cursor blinks) so the synchronous driver terminates.
+	// cursor blinks, tail polls) so the synchronous driver terminates. Tests
+	// that exercise tailing inject tailResultMsg directly.
 	switch msg.(type) {
-	case clearStatusMsg, spinner.TickMsg, cursor.BlinkMsg:
+	case clearStatusMsg, spinner.TickMsg, cursor.BlinkMsg, tailTickMsg:
 		return nil
 	}
 	return []tea.Msg{msg}
