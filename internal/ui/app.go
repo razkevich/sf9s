@@ -449,6 +449,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil // identity is advisory; the org still works
 		}
 		m.orgInfo[msg.orgID] = msg.info
+		if ov, ok := m.views[ViewOrgs].(*orgsView); ok {
+			ov.setOrgs(m.orgs) // the list can now label this org honestly
+		}
 		if m.current != nil && m.current.OrgID == msg.orgID && msg.info.Production() {
 			return m, toast(statusWarn, "⚠ "+m.current.Title()+" is PRODUCTION ("+msg.info.Edition()+") — changes here are real")
 		}

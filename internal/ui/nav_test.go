@@ -280,3 +280,17 @@ func TestOrgInfoFailureIsNonFatal(t *testing.T) {
 		t.Errorf("identity is advisory; its failure should not shout at the user:\nbefore:\n%s\nafter:\n%s", before, m.View())
 	}
 }
+
+func TestOrgListLabelsProductionWhenKnown(t *testing.T) {
+	m := multiOrgModel(t)
+	target := m.orgs[1]
+	drive(t, m, orgInfoMsg{orgID: target.OrgID, info: &api.OrgInfo{OrganizationType: "Unlimited Edition"}})
+	view := m.View()
+	if !strings.Contains(view, "PRODUCTION") {
+		t.Fatalf("the org list should label a known production org:\n%s", view)
+	}
+	// And an org we have never opened stays honestly unlabelled.
+	if strings.Count(view, "PRODUCTION") != 1 {
+		t.Fatalf("only the org we asked about should be labelled:\n%s", view)
+	}
+}

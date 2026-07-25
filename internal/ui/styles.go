@@ -76,6 +76,8 @@ func statusCellStyle(value string) lipgloss.Style {
 // orgTypeCellStyle gives each org flavor a stable identity color.
 func orgTypeCellStyle(value string) lipgloss.Style {
 	switch value {
+	case "PRODUCTION":
+		return styleProdText
 	case "scratch":
 		return styleWarn
 	case "devhub":

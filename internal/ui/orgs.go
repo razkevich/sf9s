@@ -67,7 +67,17 @@ func (v *orgsView) setOrgs(orgs []sfcli.Org) {
 		if status == "" {
 			status = "checking…"
 		}
-		rows[i] = []string{marker, o.Title(), o.Username, o.Type(), status, o.ExpirationDate, o.InstanceURL}
+		// Prefer what the org said about itself over the CLI's coarse flags:
+		// "production" and "developer" both look like "org" to the CLI.
+		kind := o.Type()
+		if info := v.app.orgInfo[o.OrgID]; info != nil {
+			if info.Production() {
+				kind = "PRODUCTION"
+			} else if e := info.Edition(); e != "" {
+				kind = e
+			}
+		}
+		rows[i] = []string{marker, o.Title(), o.Username, kind, status, o.ExpirationDate, o.InstanceURL}
 	}
 	v.table.SetDataPreservingView([]string{" ", "Alias", "Username", "Type", "Status", "Expires", "Instance URL"}, rows)
 	if cursorUser != "" {
