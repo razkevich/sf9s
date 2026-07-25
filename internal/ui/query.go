@@ -827,11 +827,12 @@ func (v *queryView) View(width, height int) string {
 	}
 
 	resultHead := ""
-	if v.exported != "" {
+	switch {
+	case v.exported != "":
 		resultHead = styleOK.Render("saved → " + runewidth.Truncate(v.exported, max(width-10, 20), "…"))
-	} else if v.lastErr != nil {
+	case v.lastErr != nil:
 		resultHead = styleErrText.Render("✖ " + runewidth.Truncate(oneLine(v.lastErr.Error()), max(width-4, 20), "…"))
-	} else if v.result != nil {
+	case v.result != nil:
 		resultHead = styleDim.Render(fmt.Sprintf("%d/%d rows • %s", v.fetched, v.result.TotalSize, v.elapsed.Round(time.Millisecond)))
 		if v.result.NextRecordsURL != "" {
 			resultHead += styleDim.Render(" • m = more")

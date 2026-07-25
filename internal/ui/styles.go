@@ -78,8 +78,8 @@ func orgTypeCellStyle(value string) lipgloss.Style {
 	switch value {
 	case "PRODUCTION":
 		return styleProdText
-	case "org?":
-		// Nothing rules out production yet.
+	case "prod?":
+		// Nothing rules out production yet — the org has not been asked.
 		return styleWarn
 	case "developer":
 		return styleDim

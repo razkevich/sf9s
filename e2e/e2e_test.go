@@ -241,6 +241,38 @@ func TestJourneySchemaLimitsDeploys(t *testing.T) {
 	h.quit(t)
 }
 
+// The deploys view has to answer "why did it fail", not just "did it fail".
+func TestJourneyDeployFailureDetails(t *testing.T) {
+	h := start(t)
+	h.waitFor(t, "Authenticated orgs (3)")
+	h.key(tea.KeyEnter)
+	h.waitFor(t, "SOQL")
+	h.key(tea.KeyEsc)
+	h.waitFor(t, "Authenticated orgs")
+
+	h.palette("deploys")
+	h.waitFor(t, "0AfE2E0000FAIL", "Failed")
+
+	// The failed deploy is first; enter drills into the component failures.
+	h.key(tea.KeyEnter)
+	// Apex test failures belong in the same list. (One waitFor: teatest
+	// consumes the stream, so a second call would never see this frame.)
+	h.waitFor(t, "InvoiceService", "Variable does not exist: totl", "42", "InvoiceServiceTest")
+
+	// One level deeper: the focused failure in full, including the file and
+	// the line the compiler complained about.
+	h.key(tea.KeyEnter)
+	h.waitFor(t, "classes/InvoiceService.cls", "42:7", "Variable does not exist: totl")
+	h.key(tea.KeyEsc)
+
+	// The Apex test failure carries its stack trace.
+	h.key(tea.KeyDown)
+	h.key(tea.KeyDown)
+	h.key(tea.KeyEnter)
+	h.waitFor(t, "Assertion Failed", "InvoiceServiceTest.testTotals: line 18")
+	h.quit(t)
+}
+
 func TestJourneyApexLogSearchAndDelete(t *testing.T) {
 	h := start(t)
 	h.waitFor(t, "Authenticated orgs (3)")

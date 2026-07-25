@@ -248,6 +248,8 @@ type Field struct {
 	Createable       bool            `json:"createable"`
 	Updateable       bool            `json:"updateable"`
 	Calculated       bool            `json:"calculated"`
+	Unique           bool            `json:"unique"`
+	ExternalID       bool            `json:"externalId"`
 	ReferenceTo      []string        `json:"referenceTo"`
 	RelationshipName string          `json:"relationshipName"`
 	PicklistValues   []PicklistValue `json:"picklistValues"`

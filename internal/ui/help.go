@@ -68,6 +68,8 @@ var viewHelp = map[ViewID][]keyHint{
 	ViewOrgs: {
 		{"enter", "use org and open query view"},
 		{"space", "use org, stay here"},
+		{"d", "org details + why the connection is failing"},
+		{"y (in card)", "copy the full connection status"},
 		{"o", "open org in browser"},
 		{"y / Y", "copy access token / instance URL"},
 		{"R", "re-run org discovery"},
@@ -88,7 +90,9 @@ var viewHelp = map[ViewID][]keyHint{
 		{"e / E (results)", "export CSV / JSON"},
 	},
 	ViewSchema: {
-		{"enter", "open object's fields"},
+		{"enter", "open object's fields, then the field detail card"},
+		{"y (card)", "copy picklist values / field details"},
+		{"esc (card)", "close the card"},
 		{"y", "copy object/field API name"},
 		{"c", "build SELECT query for object"},
 		{"R", "reload the object list"},
@@ -104,8 +108,10 @@ var viewHelp = map[ViewID][]keyHint{
 		{"esc", "back to type list"},
 	},
 	ViewDeploys: {
-		{"enter", "inspect deployment"},
+		{"enter", "show component and Apex test failures"},
+		{"enter (failures)", "full problem text and stack trace"},
 		{"R", "refresh"},
+		{"esc", "back to the deployment list"},
 	},
 	ViewLogs: {
 		{"enter", "open log body"},

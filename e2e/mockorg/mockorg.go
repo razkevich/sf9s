@@ -90,11 +90,35 @@ func New() *Server {
 			records, count := s.apexLogRecords()
 			fmt.Fprintf(w, `{"totalSize":%d,"done":true,"records":[%s]}`, count, records)
 		case strings.Contains(q, "FROM DeployRequest"):
-			fmt.Fprint(w, `{"totalSize":1,"done":true,"records":[
+			fmt.Fprint(w, `{"totalSize":2,"done":true,"records":[
+				{"attributes":{"type":"DeployRequest"},"Id":"0AfE2E0000FAIL","Status":"Failed","CreatedBy":{"attributes":{"type":"Name"},"Name":"Dana"},"CreatedDate":"2026-07-25T09:10:00.000+0000","StartDate":"2026-07-25T09:10:01.000+0000","CompletedDate":"2026-07-25T09:10:30.000+0000","CheckOnly":false,"NumberComponentsDeployed":5,"NumberComponentsTotal":7,"NumberComponentErrors":2,"NumberTestsCompleted":3,"NumberTestsTotal":4,"NumberTestErrors":1,"ErrorMessage":"Deploy failed"},
 				{"attributes":{"type":"DeployRequest"},"Id":"0AfE2E0000001","Status":"Succeeded","CreatedBy":{"attributes":{"type":"Name"},"Name":"Alex"},"CreatedDate":"2026-07-24T13:41:15.000+0000","StartDate":"2026-07-24T13:41:16.000+0000","CompletedDate":"2026-07-24T13:41:16.000+0000","CheckOnly":false,"NumberComponentsDeployed":3,"NumberComponentsTotal":3,"NumberComponentErrors":0,"NumberTestsCompleted":0,"NumberTestsTotal":0,"NumberTestErrors":0,"ErrorMessage":null}]}`)
 		default:
 			fmt.Fprint(w, `{"totalSize":0,"done":true,"records":[]}`)
 		}
+	})
+
+	// Deploy details: the component failures that explain a failed deploy.
+	mux.HandleFunc("GET /services/data/v64.0/metadata/deployRequest/{id}", func(w http.ResponseWriter, r *http.Request) {
+		if r.PathValue("id") == "0AfE2E0000FAIL" {
+			fmt.Fprint(w, `{"id":"0AfE2E0000FAIL","status":"Failed","success":false,
+				"numberComponentErrors":2,"numberComponentsTotal":7,"numberTestErrors":1,
+				"deployResult":{"status":"Failed","success":false,"errorMessage":"Deploy failed",
+				"numberComponentErrors":2,"numberComponentsTotal":7,"numberTestErrors":1,
+				"details":{"componentFailures":[
+					{"componentType":"ApexClass","fullName":"InvoiceService","fileName":"classes/InvoiceService.cls",
+					 "problemType":"Error","problem":"Variable does not exist: totl","lineNumber":42,"columnNumber":7},
+					{"componentType":"Layout","fullName":"Account-Account (Marketing) Layout","fileName":"layouts/Account.layout",
+					 "problemType":"Error","problem":"Not available for deploy for this organization"}],
+				"runTestResult":{"failures":[
+					{"name":"InvoiceServiceTest","methodName":"testTotals",
+					 "message":"System.AssertException: Assertion Failed: expected 10 actual 0",
+					 "stackTrace":"Class.InvoiceServiceTest.testTotals: line 18, column 1"}]}}}}`)
+			return
+		}
+		fmt.Fprint(w, `{"id":"0AfE2E0000001","status":"Succeeded","success":true,
+			"deployResult":{"status":"Succeeded","success":true,"numberComponentsTotal":3,
+			"numberComponentsDeployed":3,"details":{}}}`)
 	})
 
 	mux.HandleFunc("GET /services/data/v64.0/sobjects", func(w http.ResponseWriter, r *http.Request) {

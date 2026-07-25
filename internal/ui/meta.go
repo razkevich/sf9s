@@ -169,12 +169,6 @@ func (v *metaView) Update(msg tea.Msg) tea.Cmd {
 					return v.loadComponents(name)
 				}
 			}
-		case "esc":
-			if v.inComps {
-				v.inComps = false
-				return nil
-			}
-			return goBack
 		case "R":
 			if !v.inComps && !v.loading {
 				return v.fetchTypes()
