@@ -470,3 +470,46 @@ func TestClipboardCopyInstanceURL(t *testing.T) {
 		t.Fatalf("Y should copy instance URL, copied=%v", copied)
 	}
 }
+
+func TestCachedSelectionDroppedWhenOrgIsGone(t *testing.T) {
+	srv := testServer(t)
+	m := newTestModel(t, srv.URL)
+	cached := mustOrgs(t, `{"status":0,"result":{"nonScratchOrgs":[
+		{"username":"gone@corp.com","aliases":["gone"],"orgId":"00D9","instanceUrl":"https://g.my.salesforce.com","connectedStatus":"Connected","isDefaultUsername":true}
+	],"scratchOrgs":[]}}`)
+
+	// Disk cache lets the user start working immediately…
+	drive(t, m, orgsLoadedMsg{orgs: cached, partial: true, cached: true})
+	if m.current == nil || m.current.Alias != "gone" {
+		t.Fatal("cached inventory should make the default org usable at once")
+	}
+
+	// …but the live list is authoritative: this org was logged out since.
+	drive(t, m, orgsLoadedMsg{orgs: mustOrgs(t, testOrgList)})
+	if m.current != nil {
+		t.Fatalf("a selection the live list does not confirm must be dropped, still %q", m.current.Title())
+	}
+	view := m.View()
+	if !strings.Contains(view, "no longer authenticated") {
+		t.Fatalf("the user should be told why:\n%s", view)
+	}
+	if strings.Contains(view, "gone@corp.com") {
+		t.Fatalf("stale org should disappear from the list:\n%s", view)
+	}
+}
+
+func TestCachedSelectionKeptWhenOrgStillExists(t *testing.T) {
+	srv := testServer(t)
+	m := newTestModel(t, srv.URL)
+	drive(t, m, orgsLoadedMsg{orgs: mustOrgs(t, testOrgList), partial: true, cached: true})
+	if m.current == nil {
+		t.Fatal("precondition: org selected from cache")
+	}
+	drive(t, m, orgsLoadedMsg{orgs: mustOrgs(t, testOrgList)})
+	if m.current == nil || m.current.Alias != "prod" {
+		t.Fatal("a confirmed org must stay selected")
+	}
+	if m.currentFromCache {
+		t.Error("selection should no longer be marked provisional")
+	}
+}

@@ -74,10 +74,12 @@ type Model struct {
 	orgsErr          error
 	loadingOrgs      bool
 	awaitingStatuses bool
-	// orgsFromCache marks rows restored from disk: they may name orgs that
-	// have since been logged out, so they inform the view but never drive
-	// org selection, and live data replaces rather than merges with them.
-	orgsFromCache bool
+	// orgsFromCache marks rows restored from disk. They make -o and the
+	// default org work instantly, but they may name orgs that have since been
+	// logged out — so a selection made from them is provisional until the
+	// live list confirms it, and live data replaces rather than merges.
+	orgsFromCache    bool
+	currentFromCache bool
 
 	current *sfcli.Org
 	client  *api.Client
@@ -284,10 +286,24 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.currentView()
 		}
-		if m.current == nil && !msg.cached {
-			return m, m.autoSelectOrg()
+		var cmds []tea.Cmd
+		dropped := false
+		if !msg.cached {
+			var cmd tea.Cmd
+			cmd, dropped = m.confirmCachedSelection()
+			if cmd != nil {
+				cmds = append(cmds, cmd)
+			}
 		}
-		return m, nil
+		// After dropping a stale org, wait for the user to choose rather than
+		// silently moving them onto a different org.
+		if m.current == nil && !dropped {
+			m.currentFromCache = msg.cached
+			if cmd := m.autoSelectOrg(); cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+		}
+		return m, tea.Batch(cmds...)
 
 	case statusMsg:
 		m.status = msg
@@ -331,6 +347,28 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 	return m, tea.Batch(cmds...)
+}
+
+// confirmCachedSelection validates an org chosen from the disk cache against
+// the live list, dropping it if it no longer exists so the user cannot work
+// against an org they have logged out of.
+// It reports whether a selection was dropped.
+func (m *Model) confirmCachedSelection() (tea.Cmd, bool) {
+	if m.current == nil || !m.currentFromCache {
+		return nil, false
+	}
+	for _, o := range m.orgs {
+		if o.Username == m.current.Username {
+			m.currentFromCache = false
+			return nil, false
+		}
+	}
+	stale := m.current.Title()
+	m.current = nil
+	m.client = nil
+	m.currentFromCache = false
+	m.active = ViewOrgs
+	return toast(statusWarn, "org "+stale+" is no longer authenticated — pick one below"), true
 }
 
 // mergeOrgStatuses folds connection statuses from the slow pass into the rows
