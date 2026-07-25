@@ -58,17 +58,30 @@ func newLogsView(app *Model) *logsView {
 
 func (v *logsView) Title() string { return "logs" }
 
-func (v *logsView) Hints() string {
+func (v *logsView) Keys() []keyHint {
 	switch {
 	case v.confirmDelete:
-		return "delete this log? y / n"
+		return []keyHint{{"y", "confirm delete"}, {"n", "cancel"}}
 	case v.inBody:
-		return "/ search • n/N next/prev match • esc back"
+		return []keyHint{{"/", "search"}, {"n/N", "next/prev match"}, {"esc", "back"}}
 	case v.tailing:
-		return "TAILING • t stop • enter open • / filter"
+		return []keyHint{{"t", "stop tail"}, {"enter", "open"}, {"/", "filter"}}
 	default:
-		return "enter open • t tail • d delete • R refresh • / filter"
+		return []keyHint{{"enter", "open"}, {"t", "tail"}, {"d", "delete"}, {"R", "refresh"}, {"/", "filter"}}
 	}
+}
+
+func (v *logsView) Bail() bool {
+	switch {
+	case v.confirmDelete:
+		v.confirmDelete, v.confirmDeleteID = false, ""
+	case v.inBody:
+		v.inBody = false
+	case v.table.ClearFilter():
+	default:
+		return false
+	}
+	return true
 }
 
 func (v *logsView) Capturing() bool {

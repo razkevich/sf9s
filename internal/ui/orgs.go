@@ -28,9 +28,18 @@ func newOrgsView(app *Model) *orgsView {
 
 func (v *orgsView) Title() string { return "orgs" }
 
-func (v *orgsView) Hints() string {
-	return "enter use+query • space use • o open • y token • Y url • R reload • ? help"
+func (v *orgsView) Keys() []keyHint {
+	return []keyHint{
+		{"enter", "use org + query"},
+		{"space", "use org"},
+		{"o", "open in browser"},
+		{"y", "copy token"},
+		{"Y", "copy URL"},
+		{"R", "reload orgs"},
+	}
 }
+
+func (v *orgsView) Bail() bool { return v.table.ClearFilter() }
 
 func (v *orgsView) Capturing() bool { return v.table.Filtering() }
 

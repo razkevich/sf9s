@@ -54,7 +54,7 @@ func startLocalstack(t *testing.T) *harness {
 
 func TestLocalstackOrgAndQuery(t *testing.T) {
 	h := startLocalstack(t)
-	h.waitFor(t, "Authenticated orgs (3)", "⚡ e2e")
+	h.waitFor(t, "Authenticated orgs (3)", "Org:")
 
 	h.key(tea.KeyEnter)
 	h.typeString("SELECT Id, Name FROM Account LIMIT 5")

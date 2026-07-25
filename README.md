@@ -62,18 +62,28 @@ schema is still downloading is answered when it arrives.
 | **deploys** | recent metadata deployments with component/test counts and error details |
 | **logs** | Apex debug logs: browse, open, search inside a log (`/`, `n/N`), **tail** new logs live (`t`), delete |
 
-Navigate anywhere with the `:` command palette (like k9s), `?` shows every
-key, `/` filters any table, `esc` always goes back, `ctrl+c` always quits.
+<img src="docs/img/orgs.png" alt="sf9s orgs view" width="850">
 
-## Keys (the short version)
+## Navigation (k9s conventions)
+
+If you know k9s, you already know this. The header shows your org context on
+the left, what the current view can do in the middle, and your orgs on
+numbered hotkeys — the same place k9s puts numbered namespaces.
 
 ```
-:            command palette          /       filter any table
-?            help                     esc     back / close
-enter        select / inspect         q       back (quit on orgs view)
-h j k l      move rows / pan columns  g G     top / bottom
-tab          complete at cursor       ctrl+r  run query
+:query  :schema  :limits  :meta  :deploys  :logs  :orgs      command mode
+:sc  :lim  :md  :dep  :sql  :apex                            aliases (ctrl+a lists them all)
+:q                                                           quit
+1 … 9                                                        switch org
+esc                                                          bail out one level
+?                                                            keys for this view
+/                                                            filter any table
+h j k l   g G   pgup/pgdn                                    move, jump, page
 ```
+
+`esc` unwinds one thing at a time — a filter, then an open card or drill-down,
+then the view itself — and the breadcrumb at the bottom shows where you are
+(`orgs › schema › limits`). `q` does the same, and quits from the orgs view.
 
 Run `sf9s -o my-alias` to land directly on a specific org, and `sf9s -h` for
 the full introduction.

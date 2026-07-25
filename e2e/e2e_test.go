@@ -138,7 +138,7 @@ func (h *harness) quit(t *testing.T) {
 func TestJourneyOrgsQueryExport(t *testing.T) {
 	h := start(t)
 	// Org discovery: all three orgs listed, default org in the status bar.
-	h.waitFor(t, "Authenticated orgs (3)", "scratchy", "2026-08-15", "⚡ e2e")
+	h.waitFor(t, "Authenticated orgs (3)", "scratchy", "2026-08-15", "Org:", "e2e@example.com")
 
 	h.key(tea.KeyEnter) // use org, jump to query view
 	h.typeString("SELECT Id, Name, Owner.Name, AnnualRevenue FROM Account")

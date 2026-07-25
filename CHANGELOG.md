@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+- **k9s-style navigation.** The header now carries an org context block, the
+  current view's key legend, and numbered org hotkeys (`1`…`9`) — where k9s
+  puts numbered namespaces. Command mode gained aliases (`:sc`, `:lim`, `:md`,
+  `:dep`, `:sql`, `:apex`), `ctrl+a` lists every view with its aliases, and
+  `:q` now quits instead of matching "query".
+- `esc` bails out one level at a time (filter → card/drill-down → view), with a
+  breadcrumb trail at the bottom showing how you got there.
+- The header collapses to a single line on terminals too small for it.
+
 ## v0.2.0 — 2026-07-25
 
 - **Live Apex log tail**: `t` on the logs view watches for new debug logs and

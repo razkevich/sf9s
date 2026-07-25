@@ -17,14 +17,13 @@ var (
 	colorWarn     = lipgloss.AdaptiveColor{Light: "#9A6700", Dark: "#D29922"}
 	colorErr      = lipgloss.AdaptiveColor{Light: "#CF222E", Dark: "#F85149"}
 
-	styleLogo = lipgloss.NewStyle().Bold(true).
+	styleLogoChip = lipgloss.NewStyle().Bold(true).
 			Foreground(colorOnAccent).Background(colorAccent)
 	styleVersion = lipgloss.NewStyle().Foreground(colorDim)
 	styleTab     = lipgloss.NewStyle().Foreground(colorDim)
 	styleTabOn   = lipgloss.NewStyle().Foreground(colorOnAccent).Background(colorAccent).Bold(true)
 
 	styleBand      = lipgloss.NewStyle().Background(colorBand)
-	styleStatusOrg = lipgloss.NewStyle().Bold(true).Foreground(colorAccent).Background(colorBand)
 	styleStatusDim = lipgloss.NewStyle().Foreground(colorDim).Background(colorBand)
 	styleToastOK   = lipgloss.NewStyle().Foreground(colorOK).Background(colorBand)
 	styleToastWarn = lipgloss.NewStyle().Foreground(colorWarn).Background(colorBand)

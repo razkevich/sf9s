@@ -231,7 +231,17 @@ func (t *dataTable) Cell(col string) string {
 }
 
 func (t *dataTable) Filtering() bool { return t.filtering }
-func (t *dataTable) RowCount() int   { return len(t.filtered) }
+
+// ClearFilter drops a committed filter, reporting whether there was one.
+func (t *dataTable) ClearFilter() bool {
+	if t.filter == "" {
+		return false
+	}
+	t.filter = ""
+	t.applyFilter()
+	return true
+}
+func (t *dataTable) RowCount() int { return len(t.filtered) }
 
 // Update consumes navigation and filter keys; returns true if handled.
 func (t *dataTable) Update(msg tea.KeyMsg) bool {

@@ -34,11 +34,26 @@ func newSchemaView(app *Model) *schemaView {
 
 func (v *schemaView) Title() string { return "schema" }
 
-func (v *schemaView) Hints() string {
+func (v *schemaView) Keys() []keyHint {
 	if v.inFields {
-		return "y copy field • c build query • esc back • / filter"
+		return []keyHint{{"y", "copy field"}, {"c", "build query"}, {"esc", "back"}, {"/", "filter"}}
 	}
-	return "enter fields • y copy name • c build query • R reload • / filter"
+	return []keyHint{{"enter", "fields"}, {"y", "copy name"}, {"c", "build query"}, {"/", "filter"}}
+}
+
+func (v *schemaView) Bail() bool {
+	table := v.objTable
+	if v.inFields {
+		table = v.fieldTable
+	}
+	switch {
+	case table.ClearFilter():
+	case v.inFields:
+		v.inFields = false
+	default:
+		return false
+	}
+	return true
 }
 
 func (v *schemaView) Capturing() bool {

@@ -10,9 +10,35 @@ import (
 
 type paletteItem struct {
 	name string
-	desc string
-	id   ViewID
-	quit bool
+	// aliases are the short forms k9s users expect (:sc, :lim, :q).
+	aliases []string
+	desc    string
+	id      ViewID
+	quit    bool
+}
+
+// matches reports whether needle names this item, and whether it does so
+// exactly — exact names win, so :q quits instead of opening "query".
+func (i paletteItem) matches(needle string) (hit, exact bool) {
+	if needle == "" {
+		return true, false
+	}
+	for _, name := range append([]string{i.name}, i.aliases...) {
+		switch {
+		case name == needle:
+			return true, true
+		case strings.HasPrefix(name, needle):
+			hit = true
+		}
+	}
+	return hit, false
+}
+
+func (i paletteItem) aliasLabel() string {
+	if len(i.aliases) == 0 {
+		return ""
+	}
+	return strings.Join(i.aliases, ", ")
 }
 
 // palette is the k9s-style `:` command jumper.
@@ -22,6 +48,8 @@ type palette struct {
 	items   []paletteItem
 	matches []int
 	cursor  int
+	// listing marks the ctrl+a view: same list, framed as a reference.
+	listing bool
 }
 
 func newPalette() *palette {
@@ -32,34 +60,56 @@ func newPalette() *palette {
 	return &palette{
 		input: ti,
 		items: []paletteItem{
-			{name: "orgs", desc: "authenticated orgs (home)", id: ViewOrgs},
-			{name: "query", desc: "SOQL query editor", id: ViewQuery},
-			{name: "schema", desc: "object & field browser", id: ViewSchema},
-			{name: "limits", desc: "org limits & usage", id: ViewLimits},
-			{name: "meta", desc: "metadata inventory", id: ViewMeta},
-			{name: "deploys", desc: "recent metadata deployments", id: ViewDeploys},
-			{name: "logs", desc: "apex debug logs", id: ViewLogs},
-			{name: "quit", desc: "exit sf9s", quit: true},
+			{name: "orgs", aliases: []string{"org", "o"}, desc: "authenticated orgs (home)", id: ViewOrgs},
+			{name: "query", aliases: []string{"soql", "sql"}, desc: "SOQL query editor", id: ViewQuery},
+			{name: "schema", aliases: []string{"sobjects", "sc"}, desc: "object & field browser", id: ViewSchema},
+			{name: "limits", aliases: []string{"lim"}, desc: "org limits & usage", id: ViewLimits},
+			{name: "meta", aliases: []string{"metadata", "md"}, desc: "metadata inventory", id: ViewMeta},
+			{name: "deploys", aliases: []string{"deploy", "dep"}, desc: "recent metadata deployments", id: ViewDeploys},
+			{name: "logs", aliases: []string{"log", "apex"}, desc: "apex debug logs", id: ViewLogs},
+			{name: "quit", aliases: []string{"q", "exit"}, desc: "exit sf9s", quit: true},
 		},
 	}
 }
 
 func (p *palette) Open() {
 	p.open = true
+	p.listing = false
 	p.cursor = 0
 	p.input.SetValue("")
 	p.input.Focus()
 	p.refilter()
 }
 
+// OpenAliases shows every view with its aliases — k9s ctrl-a.
+func (p *palette) OpenAliases() {
+	p.Open()
+	p.listing = true
+}
+
+// selectedItem is the entry Enter would act on.
+func (p *palette) selectedItem() paletteItem {
+	if p.cursor < 0 || p.cursor >= len(p.matches) {
+		return paletteItem{}
+	}
+	return p.items[p.matches[p.cursor]]
+}
+
 func (p *palette) refilter() {
 	p.matches = p.matches[:0]
 	needle := strings.ToLower(strings.TrimSpace(p.input.Value()))
+	var exact []int
 	for i, item := range p.items {
-		if needle == "" || strings.HasPrefix(item.name, needle) || strings.Contains(item.name, needle) {
+		hit, isExact := item.matches(needle)
+		switch {
+		case isExact:
+			exact = append(exact, i)
+		case hit:
 			p.matches = append(p.matches, i)
 		}
 	}
+	// An exact name or alias always leads, so :q quits and :o opens orgs.
+	p.matches = append(exact, p.matches...)
 	if p.cursor >= len(p.matches) {
 		p.cursor = 0
 	}
@@ -100,18 +150,23 @@ func (p *palette) Update(msg tea.KeyMsg) tea.Cmd {
 
 func (p *palette) View(width, height int) string {
 	var b strings.Builder
+	if p.listing {
+		b.WriteString(styleTitle.Render("Views") + styleDim.Render("  (type to filter, enter to jump)") + "\n")
+	}
 	b.WriteString(p.input.View())
 	b.WriteString("\n\n")
 	for i, idx := range p.matches {
 		item := p.items[idx]
-		line := "  " + padRight(item.name, 10) + styleDim.Render(item.desc)
+		row := padRight(item.name, 9) + padRight(item.aliasLabel(), 18) + item.desc
 		if i == p.cursor {
-			line = styleRowSelected.Render("▸ " + padRight(item.name, 10) + item.desc)
+			b.WriteString(styleRowSelected.Render("▸ " + row))
+		} else {
+			b.WriteString("  " + padRight(item.name, 9) +
+				styleHotkey.Render(padRight(item.aliasLabel(), 18)) + styleDim.Render(item.desc))
 		}
-		b.WriteString(line)
 		b.WriteByte('\n')
 	}
-	box := styleOverlay.Width(min(60, width-4)).Render(b.String())
+	box := styleOverlay.Width(min(72, width-4)).Render(b.String())
 	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, box)
 }
 

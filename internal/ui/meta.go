@@ -31,11 +31,26 @@ func newMetaView(app *Model) *metaView {
 
 func (v *metaView) Title() string { return "meta" }
 
-func (v *metaView) Hints() string {
+func (v *metaView) Keys() []keyHint {
 	if v.inComps {
-		return "y copy name • esc back • / filter"
+		return []keyHint{{"y", "copy name"}, {"esc", "back"}, {"/", "filter"}}
 	}
-	return "enter list components • R reload • / filter"
+	return []keyHint{{"enter", "list components"}, {"R", "reload"}, {"/", "filter"}}
+}
+
+func (v *metaView) Bail() bool {
+	table := v.typeTable
+	if v.inComps {
+		table = v.compTable
+	}
+	switch {
+	case table.ClearFilter():
+	case v.inComps:
+		v.inComps = false
+	default:
+		return false
+	}
+	return true
 }
 
 func (v *metaView) Capturing() bool {

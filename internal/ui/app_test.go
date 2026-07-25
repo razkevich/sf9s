@@ -182,8 +182,12 @@ func TestStartupToOrgsView(t *testing.T) {
 	if m.current == nil || m.current.Alias != "prod" {
 		t.Fatal("default org should be auto-selected")
 	}
-	if !strings.Contains(view, "⚡ prod") {
-		t.Fatalf("status bar should show current org:\n%s", view)
+	// The k9s-style header carries the org context.
+	if !strings.Contains(view, "Org:") || !strings.Contains(view, "prod") {
+		t.Fatalf("header should show current org:\n%s", view)
+	}
+	if !strings.Contains(view, "<1>") {
+		t.Fatalf("header should offer numbered org hotkeys:\n%s", view)
 	}
 }
 

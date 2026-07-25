@@ -74,15 +74,46 @@ func newQueryView(app *Model) *queryView {
 
 func (v *queryView) Title() string { return "query" }
 
-func (v *queryView) Hints() string {
-	api := "REST"
-	if v.tooling {
-		api = "Tooling"
+func (v *queryView) Keys() []keyHint {
+	if v.popup.open() {
+		return []keyHint{{"↑↓", "move"}, {"enter/tab", "accept"}, {"esc", "dismiss"}}
 	}
 	if v.focusResults {
-		return fmt.Sprintf("[%s] tab edit • enter card • y/Y copy cell/row • m more • e/E export", api)
+		return []keyHint{
+			{"tab", "edit query"},
+			{"enter", "inspect row"},
+			{"y/Y", "copy cell/row"},
+			{"m", "fetch more"},
+			{"e/E", "export CSV/JSON"},
+			{"/", "filter"},
+		}
 	}
-	return fmt.Sprintf("[%s] ctrl+r run • tab complete • ctrl+t tooling • ctrl+p/n history • ctrl+s saved", api)
+	return []keyHint{
+		{"ctrl+r", "run"},
+		{"tab", "complete"},
+		{"ctrl+t", "toggle tooling"},
+		{"ctrl+p/n", "history"},
+		{"ctrl+s", "saved queries"},
+	}
+}
+
+func (v *queryView) Bail() bool {
+	switch {
+	case v.popup.open():
+		v.popup = nil
+	case v.card != nil:
+		v.card = nil
+	case v.showPicker:
+		v.showPicker = false
+	case v.table.ClearFilter():
+	case v.focusResults:
+		// Step back into the editor before leaving the view entirely.
+		v.focusResults = false
+		v.editor.Focus()
+	default:
+		return false
+	}
+	return true
 }
 
 func (v *queryView) Capturing() bool {

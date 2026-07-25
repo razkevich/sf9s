@@ -43,14 +43,36 @@ var viewNames = map[ViewID]string{
 
 var viewOrder = []ViewID{ViewOrgs, ViewQuery, ViewSchema, ViewLimits, ViewMeta, ViewDeploys, ViewLogs}
 
+// keyHint is one entry of a view's key legend, rendered in the header grid
+// (k9s style) and in the help overlay.
+type keyHint struct {
+	key  string
+	desc string
+}
+
 // view is the contract every sub-model fulfills.
 type view interface {
 	Init() tea.Cmd
 	Update(msg tea.Msg) tea.Cmd
 	View(width, height int) string
 	Title() string
-	Hints() string
+	// Keys lists the actions available right now; it changes with the view's
+	// own mode (browsing a list vs. reading a log body, say).
+	Keys() []keyHint
+	// Bail closes one level of the view's own state (a filter, an open card,
+	// a drill-down) and reports whether it did. When it returns false the app
+	// walks back up the crumb trail instead.
+	Bail() bool
 	Capturing() bool
+}
+
+// hintLine renders key hints as a single compact line.
+func hintLine(hints []keyHint) string {
+	parts := make([]string, 0, len(hints))
+	for _, h := range hints {
+		parts = append(parts, h.key+" "+h.desc)
+	}
+	return strings.Join(parts, " • ")
 }
 
 // Deps wires the outside world into the UI; tests substitute fakes.
@@ -85,7 +107,10 @@ type Model struct {
 	client  *api.Client
 
 	active ViewID
-	views  map[ViewID]view
+	// stack is the navigation trail behind the active view; esc pops it, the
+	// way k9s bails out one level at a time.
+	stack []ViewID
+	views map[ViewID]view
 
 	palette  *palette
 	showHelp bool
@@ -225,6 +250,15 @@ func (m *Model) navigate(id ViewID) tea.Cmd {
 	if lv, ok := m.views[ViewLogs].(*logsView); ok && id != ViewLogs {
 		lv.stopTail()
 	}
+	if id != m.active {
+		if i := crumbIndex(m.stack, id); i >= 0 {
+			// Returning to a view already on the trail: everything after it
+			// is no longer how we got here.
+			m.stack = m.stack[:i]
+		} else {
+			m.pushCrumb(m.active)
+		}
+	}
 	m.active = id
 	_, existed := m.views[id]
 	v := m.currentView()
@@ -232,6 +266,52 @@ func (m *Model) navigate(id ViewID) tea.Cmd {
 		return v.Init()
 	}
 	return nil
+}
+
+func crumbIndex(stack []ViewID, id ViewID) int {
+	for i, v := range stack {
+		if v == id {
+			return i
+		}
+	}
+	return -1
+}
+
+// pushCrumb records where we came from, keeping the trail free of loops: any
+// earlier visit to the same view truncates the trail there.
+func (m *Model) pushCrumb(from ViewID) {
+	for i, id := range m.stack {
+		if id == from {
+			m.stack = m.stack[:i]
+			break
+		}
+	}
+	m.stack = append(m.stack, from)
+	if len(m.stack) > 8 {
+		m.stack = m.stack[len(m.stack)-8:]
+	}
+}
+
+// popCrumb walks one level back, ending at the orgs view.
+func (m *Model) popCrumb() tea.Cmd {
+	if len(m.stack) == 0 {
+		if m.active == ViewOrgs {
+			return nil
+		}
+		return m.navigateNoCrumb(ViewOrgs)
+	}
+	prev := m.stack[len(m.stack)-1]
+	m.stack = m.stack[:len(m.stack)-1]
+	return m.navigateNoCrumb(prev)
+}
+
+// navigateNoCrumb switches view without extending the trail (used when
+// walking back through it).
+func (m *Model) navigateNoCrumb(id ViewID) tea.Cmd {
+	saved := m.stack
+	cmd := m.navigate(id)
+	m.stack = saved
+	return cmd
 }
 
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -322,10 +402,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.navigate(msg.id)
 
 	case goBackMsg:
-		if m.active != ViewOrgs {
-			return m, m.navigate(ViewOrgs)
-		}
-		return m, nil
+		return m, m.popCrumb()
 
 	case prefillQueryMsg:
 		cmd := m.navigate(ViewQuery)
@@ -347,6 +424,26 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 	return m, tea.Batch(cmds...)
+}
+
+// switchOrgByHotkey selects the org behind a number key, mirroring how k9s
+// numbers switch namespace.
+func (m *Model) switchOrgByHotkey(key string) tea.Cmd {
+	n := int(key[0] - '0')
+	title := m.orgForHotkey(n)
+	if title == "" {
+		return toast(statusWarn, "no org on <"+key+">")
+	}
+	if m.current != nil && m.current.Title() == title {
+		return toast(statusInfo, "already on "+title)
+	}
+	for _, o := range m.orgs {
+		if o.Title() == title {
+			m.setOrg(o)
+			return toast(statusOK, "switched to "+title)
+		}
+	}
+	return nil
 }
 
 // confirmCachedSelection validates an org chosen from the disk cache against
@@ -445,19 +542,34 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, v.Update(msg)
 	}
 
-	switch msg.String() {
+	switch key := msg.String(); key {
 	case ":":
 		m.palette.Open()
 		return m, nil
 	case "?":
 		m.showHelp = true
-		m.helpView.SetContent(m.active, v.Hints())
+		m.helpView.SetContent(m.active, v.Keys())
 		return m, nil
+	case "ctrl+a":
+		m.palette.OpenAliases()
+		return m, nil
+	case "esc":
+		// The view unwinds its own state first (filter, card, drill-down);
+		// only when it has nothing left to close do we leave it.
+		if v.Bail() {
+			return m, nil
+		}
+		return m, m.popCrumb()
 	case "q":
 		if m.active == ViewOrgs {
 			return m, tea.Quit
 		}
-		return m, func() tea.Msg { return goBackMsg{} }
+		return m, m.popCrumb()
+	case "1", "2", "3", "4", "5", "6", "7", "8", "9":
+		if cmd := m.switchOrgByHotkey(key); cmd != nil {
+			return m, cmd
+		}
+		return m, nil
 	}
 	return m, v.Update(msg)
 }
@@ -474,7 +586,8 @@ func (m *Model) View() string {
 		return m.centered(m.startupError())
 	}
 
-	contentH := m.height - 2
+	headerH := m.headerHeight()
+	contentH := max(m.height-headerH-1, 1)
 	var body string
 	switch {
 	case m.showHelp:
@@ -485,7 +598,8 @@ func (m *Model) View() string {
 		body = m.currentView().View(m.width, contentH)
 	}
 	body = lipgloss.NewStyle().Height(contentH).MaxHeight(contentH).Render(body)
-	return m.topBar() + "\n" + body + "\n" + m.statusBar()
+	header := lipgloss.NewStyle().Height(headerH).MaxHeight(headerH).Render(m.header())
+	return header + "\n" + body + "\n" + m.statusBar()
 }
 
 func (m *Model) startupError() string {
@@ -511,36 +625,12 @@ func (m *Model) centered(s string) string {
 
 func splashArt() string {
 	cloud := styleDim.Render("      .--.\n   .-(    ).\n  (___.__)__)")
-	return cloud + "   " + styleLogo.Render(" sf9s ") + "\n\n" +
+	return cloud + "   " + styleLogoChip.Render(" sf9s ") + "\n\n" +
 		styleDim.Render("  Salesforce orgs in your terminal")
 }
 
-func (m *Model) topBar() string {
-	left := styleLogo.Render(" ⚡ sf9s ") + " "
-	var tabs []string
-	for _, id := range viewOrder {
-		style := styleTab
-		if id == m.active {
-			style = styleTabOn
-		}
-		tabs = append(tabs, style.Render(" "+viewNames[id]+" "))
-	}
-	left += strings.Join(tabs, "")
-	version := styleVersion.Render(m.deps.Version + " ")
-	pad := m.width - lipgloss.Width(left) - lipgloss.Width(version)
-	if pad < 0 {
-		return runeTrunc(left, m.width)
-	}
-	return left + strings.Repeat(" ", pad) + version
-}
-
 func (m *Model) statusBar() string {
-	org := styleStatusDim.Render(" no org — pick one on the orgs view")
-	if m.current != nil {
-		org = styleStatusOrg.Render(" ⚡ "+m.current.Title()) +
-			styleStatusDim.Render(fmt.Sprintf(" %s [%s]", m.current.Username, m.current.Type()))
-	}
-	left := org
+	left := m.crumbs()
 	if m.status.text != "" && time.Now().Before(m.statusUntil) {
 		style := styleStatusDim
 		switch m.status.kind {
@@ -551,10 +641,11 @@ func (m *Model) statusBar() string {
 		case statusError:
 			style = styleToastErr
 		}
-		left = org + styleStatusDim.Render("  ") + style.Render(runeTrunc(m.status.text, m.width-lipgloss.Width(org)-4))
-	} else if !m.palette.open && !m.showHelp {
-		hints := m.currentView().Hints()
-		left = org + styleStatusDim.Render("  "+hints)
+		left += styleStatusDim.Render("  ") +
+			style.Render(runeTrunc(m.status.text, m.width-lipgloss.Width(left)-4))
+	} else if m.compactHeader() && !m.palette.open && !m.showHelp {
+		// The compact header has no room for the key legend, so keep it here.
+		left += styleStatusDim.Render("  " + hintLine(m.currentView().Keys()))
 	}
 	pad := m.width - lipgloss.Width(left)
 	if pad < 0 {

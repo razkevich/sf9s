@@ -1,0 +1,196 @@
+package ui
+
+import (
+	"strings"
+	"testing"
+
+	tea "github.com/charmbracelet/bubbletea"
+
+	"github.com/razkevich/sf9s/internal/sfcli"
+)
+
+func multiOrgModel(t *testing.T) *Model {
+	t.Helper()
+	srv := testServer(t)
+	m := newTestModel(t, srv.URL)
+	m.deps.SF = sfcli.New(fakeRunner{out: map[string]string{
+		"org list": `{"status":0,"result":{"nonScratchOrgs":[
+			{"username":"a@corp.com","aliases":["prod"],"orgId":"00D1","instanceUrl":"https://x.my.salesforce.com","connectedStatus":"Connected","isDefaultUsername":true},
+			{"username":"b@corp.com","aliases":["staging"],"orgId":"00D2","instanceUrl":"https://y.my.salesforce.com","connectedStatus":"Connected"},
+			{"username":"c@corp.com","aliases":["qa"],"orgId":"00D3","instanceUrl":"https://z.my.salesforce.com","connectedStatus":"Connected"}
+		],"scratchOrgs":[]}}`,
+	}})
+	loadAllOrgs(t, m)
+	return m
+}
+
+func TestNumberKeysSwitchOrg(t *testing.T) {
+	m := multiOrgModel(t)
+	if m.current == nil || m.current.Alias != "prod" {
+		t.Fatalf("precondition: default org selected, got %v", m.current)
+	}
+
+	// <1> is always the current org, so the numbering stays stable while you
+	// work; <2> and <3> are the others in list order.
+	if got := m.orgForHotkey(1); got != "prod" {
+		t.Errorf("hotkey 1 = %q, want the current org", got)
+	}
+	drive(t, m, key("2"))
+	if m.current.Alias == "prod" {
+		t.Fatal("<2> should switch to a different org")
+	}
+	switched := m.current.Alias
+	if !strings.Contains(m.View(), "switched to "+switched) {
+		t.Errorf("switch should be announced:\n%s", m.View())
+	}
+	if got := m.orgForHotkey(1); got != switched {
+		t.Errorf("after switching, hotkey 1 should be the new org, got %q", got)
+	}
+
+	drive(t, m, key("1"))
+	if !strings.Contains(m.View(), "already on "+switched) {
+		t.Errorf("pressing the current org's key should say so:\n%s", m.View())
+	}
+	drive(t, m, key("9"))
+	if !strings.Contains(m.View(), "no org on <9>") {
+		t.Errorf("an unused number should say so:\n%s", m.View())
+	}
+}
+
+func TestNumberKeysDoNotHijackTyping(t *testing.T) {
+	m := multiOrgModel(t)
+	qv := queryViewFor(t, m)
+	qv.setEditorText("")
+	drive(t, m, key("2"))
+	if got := qv.editor.Value(); got != "2" {
+		t.Fatalf("digits must reach a focused editor, editor = %q", got)
+	}
+	if m.current.Alias != "prod" {
+		t.Errorf("typing in the editor must not switch org, now %q", m.current.Alias)
+	}
+}
+
+func TestEscBailsOneLevelAtATime(t *testing.T) {
+	m := multiOrgModel(t)
+	drive(t, m, switchViewMsg{id: ViewLimits})
+	drive(t, m, switchViewMsg{id: ViewMeta})
+	if m.active != ViewMeta {
+		t.Fatalf("precondition: on meta, got %v", m.active)
+	}
+	if !strings.Contains(m.View(), "orgs") || !strings.Contains(m.View(), "limits") {
+		t.Fatalf("crumbs should show the trail:\n%s", m.View())
+	}
+
+	drive(t, m, key("esc"))
+	if m.active != ViewLimits {
+		t.Fatalf("esc should bail to the previous view, got %v", m.active)
+	}
+	drive(t, m, key("esc"))
+	if m.active != ViewOrgs {
+		t.Fatalf("esc should continue back to orgs, got %v", m.active)
+	}
+	drive(t, m, key("esc"))
+	if m.active != ViewOrgs {
+		t.Fatalf("esc on orgs should stay put, got %v", m.active)
+	}
+}
+
+func TestEscLetsTheViewBailFirst(t *testing.T) {
+	m := multiOrgModel(t)
+	drive(t, m, switchViewMsg{id: ViewSchema})
+	sv := m.views[ViewSchema].(*schemaView)
+	if cmd := sv.Init(); cmd != nil {
+		drive(t, m, cmd())
+	}
+	drive(t, m, key("enter")) // into the field list
+	if !sv.inFields {
+		t.Fatal("precondition: viewing fields")
+	}
+	drive(t, m, key("esc"))
+	if sv.inFields {
+		t.Error("esc should leave the field list first")
+	}
+	if m.active != ViewSchema {
+		t.Fatalf("that esc should not leave the schema view, got %v", m.active)
+	}
+	drive(t, m, key("esc"))
+	if m.active != ViewOrgs {
+		t.Fatalf("the next esc should bail out of the view, got %v", m.active)
+	}
+}
+
+func TestCrumbTrailHasNoLoops(t *testing.T) {
+	m := multiOrgModel(t)
+	drive(t, m, switchViewMsg{id: ViewLimits})
+	drive(t, m, switchViewMsg{id: ViewMeta})
+	drive(t, m, switchViewMsg{id: ViewLimits}) // revisit
+	if len(m.stack) != 1 || m.stack[0] != ViewOrgs {
+		t.Fatalf("revisiting a view should truncate the trail there, got %v", m.stack)
+	}
+}
+
+func TestPaletteAliasesAndQuit(t *testing.T) {
+	m := multiOrgModel(t)
+
+	// :sc is schema's alias.
+	drive(t, m, key(":"))
+	for _, r := range "sc" {
+		drive(t, m, key(string(r)))
+	}
+	drive(t, m, key("enter"))
+	if m.active != ViewSchema {
+		t.Fatalf(":sc should open schema, got %v", m.active)
+	}
+
+	// :q must quit (k9s), not open "query" — exact aliases win over prefixes.
+	drive(t, m, key(":"))
+	drive(t, m, key("q"))
+	if got := m.palette.selectedItem(); !got.quit {
+		t.Fatalf(":q should select quit, selected %q", got.name)
+	}
+
+	// :sql reaches the query view.
+	m.palette.open = false
+	drive(t, m, key(":"))
+	for _, r := range "sql" {
+		drive(t, m, key(string(r)))
+	}
+	drive(t, m, key("enter"))
+	if m.active != ViewQuery {
+		t.Fatalf(":sql should open the query view, got %v", m.active)
+	}
+}
+
+func TestCtrlAListsEveryViewWithAliases(t *testing.T) {
+	m := multiOrgModel(t)
+	drive(t, m, tea.KeyMsg{Type: tea.KeyCtrlA})
+	view := m.View()
+	if !strings.Contains(view, "Views") {
+		t.Fatalf("ctrl+a should open the view list:\n%s", view)
+	}
+	for _, want := range []string{"schema", "sobjects, sc", "logs", "log, apex", "quit", "q, exit"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("view list missing %q:\n%s", want, view)
+		}
+	}
+}
+
+func TestCompactHeaderOnSmallTerminal(t *testing.T) {
+	m := multiOrgModel(t)
+	m.width, m.height = 80, 14
+	if !m.compactHeader() {
+		t.Fatal("a 80x14 terminal should use the compact header")
+	}
+	view := m.View()
+	if lines := strings.Split(view, "\n"); len(lines) > 14 {
+		t.Errorf("rendered %d lines into a 14-line terminal", len(lines))
+	}
+	if !strings.Contains(view, "sf9s") || !strings.Contains(view, "prod") {
+		t.Errorf("compact header should still orient the user:\n%s", view)
+	}
+
+	m.width, m.height = 120, 40
+	if m.compactHeader() {
+		t.Error("a 120x40 terminal should use the full header")
+	}
+}

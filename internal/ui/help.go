@@ -9,14 +9,14 @@ import (
 
 type helpOverlay struct {
 	viewID ViewID
-	hints  string
+	hints  []keyHint
 }
 
 func newHelpOverlay() *helpOverlay {
 	return &helpOverlay{}
 }
 
-func (h *helpOverlay) SetContent(id ViewID, hints string) {
+func (h *helpOverlay) SetContent(id ViewID, hints []keyHint) {
 	h.viewID = id
 	h.hints = hints
 }
@@ -27,10 +27,12 @@ func (h *helpOverlay) Update(msg tea.KeyMsg) bool {
 }
 
 var globalHelp = [][2]string{
-	{":", "command palette (jump to any view)"},
+	{":", "command mode — :query, :schema, :q to quit"},
+	{"ctrl+a", "list every view and its aliases"},
+	{"1…9", "switch org (numbered in the header)"},
 	{"?", "this help"},
-	{"esc / q", "back to orgs view"},
-	{"q (on orgs)", "quit"},
+	{"esc", "bail out one level"},
+	{"q", "back (quit on the orgs view)"},
 	{"ctrl+c", "quit from anywhere"},
 	{"/", "filter rows in any table"},
 	{"↑↓/jk  ←→/hl", "move rows / scroll columns"},

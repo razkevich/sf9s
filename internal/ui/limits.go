@@ -26,8 +26,12 @@ func newLimitsView(app *Model) *limitsView {
 	return &limitsView{app: app}
 }
 
-func (v *limitsView) Title() string   { return "limits" }
-func (v *limitsView) Hints() string   { return "R refresh • ↑↓ scroll" }
+func (v *limitsView) Title() string { return "limits" }
+func (v *limitsView) Keys() []keyHint {
+	return []keyHint{{"R", "refresh"}, {"↑↓", "scroll"}}
+}
+func (v *limitsView) Bail() bool { return false }
+
 func (v *limitsView) Capturing() bool { return false }
 
 type limitsMsg struct {

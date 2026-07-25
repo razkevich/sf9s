@@ -31,8 +31,21 @@ func newDeploysView(app *Model) *deploysView {
 	return v
 }
 
-func (v *deploysView) Title() string   { return "deploys" }
-func (v *deploysView) Hints() string   { return "enter inspect • R refresh • / filter" }
+func (v *deploysView) Title() string { return "deploys" }
+func (v *deploysView) Keys() []keyHint {
+	return []keyHint{{"enter", "inspect"}, {"R", "refresh"}, {"/", "filter"}}
+}
+func (v *deploysView) Bail() bool {
+	switch {
+	case v.card != nil:
+		v.card = nil
+	case v.table.ClearFilter():
+	default:
+		return false
+	}
+	return true
+}
+
 func (v *deploysView) Capturing() bool { return v.table.Filtering() || v.card != nil }
 
 type deploysMsg struct {
