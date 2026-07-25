@@ -48,10 +48,8 @@ func localstackURL(t *testing.T) string {
 // CLI to hand out its URL and a token the emulator accepts.
 func startLocalstack(t *testing.T) *harness {
 	t.Helper()
-	url := localstackURL(t)
-	t.Setenv("SF9S_MOCK_URL", url)
-	h := startWith(t, url)
-	return h
+	t.Setenv("SF9S_MOCK_URL", localstackURL(t))
+	return startWith(t)
 }
 
 func TestLocalstackOrgAndQuery(t *testing.T) {

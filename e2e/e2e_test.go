@@ -54,14 +54,14 @@ func start(t *testing.T) *harness {
 	org := mockorg.New()
 	t.Cleanup(org.Close)
 	t.Setenv("SF9S_MOCK_URL", org.URL)
-	h := startWith(t, org.URL)
+	h := startWith(t)
 	h.org = org
 	return h
 }
 
-// startWith boots the TUI against an org at instanceURL, which the fake sf
-// CLI is already configured to report (via SF9S_MOCK_URL).
-func startWith(t *testing.T, instanceURL string) *harness {
+// startWith boots the TUI against whatever org the fake sf CLI reports, which
+// it takes from SF9S_MOCK_URL — set by the caller before this runs.
+func startWith(t *testing.T) *harness {
 	t.Helper()
 	t.Chdir(t.TempDir())
 
