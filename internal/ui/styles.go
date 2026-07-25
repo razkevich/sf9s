@@ -45,8 +45,6 @@ var (
 
 	styleEditorFocused = lipgloss.NewStyle().
 				Border(lipgloss.RoundedBorder()).BorderForeground(colorAccent).Padding(0, 1)
-	styleEditorBlurred = lipgloss.NewStyle().
-				Border(lipgloss.RoundedBorder()).BorderForeground(colorDim).Padding(0, 1)
 )
 
 // statusCellStyle colors a status-bearing cell by its meaning; anything
