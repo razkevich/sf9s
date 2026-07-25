@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -85,6 +86,7 @@ func (v *queryView) Keys() []keyHint {
 			{"enter", "inspect row"},
 			{"y/Y", "copy cell/row"},
 			{"s", "sort column"},
+			{"o", "open record"},
 			{"m", "fetch more"},
 			{"e/E", "export CSV/JSON"},
 			{"/", "filter"},
@@ -495,6 +497,8 @@ func (v *queryView) handleKey(msg tea.KeyMsg) tea.Cmd {
 				return toast(statusInfo, "sorted by "+label)
 			}
 			return toast(statusInfo, "sort cleared")
+		case "o":
+			return v.openRecord()
 		case "m":
 			return v.fetchMore()
 		case "y":
@@ -624,6 +628,50 @@ func (v *queryView) pickerKey(msg tea.KeyMsg) tea.Cmd {
 		}
 	}
 	return nil
+}
+
+// recordIDPattern matches a Salesforce record id (15 or 18 characters).
+var recordIDPattern = regexp.MustCompile(`^[a-zA-Z0-9]{15}([a-zA-Z0-9]{3})?$`)
+
+// openRecord opens the focused row's record in the browser. Reading a record
+// in the terminal and then hunting for it in the UI is a routine annoyance;
+// this closes that loop.
+func (v *queryView) openRecord() tea.Cmd {
+	id := v.recordIDForRow()
+	if id == "" {
+		return toast(statusWarn, "no record id in this row — SELECT Id to open records")
+	}
+	if v.app.current == nil {
+		return nil
+	}
+	sf := v.app.deps.SF
+	username := v.app.current.Username
+	return tea.Batch(
+		toast(statusInfo, "opening "+id+"…"),
+		func() tea.Msg {
+			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+			defer cancel()
+			if err := sf.OpenPath(ctx, username, "/"+id); err != nil {
+				return statusMsg{kind: statusError, text: err.Error()}
+			}
+			return statusMsg{kind: statusOK, text: "opened " + id + " in your browser"}
+		},
+	)
+}
+
+// recordIDForRow finds the id of the focused row: the Id column when the
+// query selected one, otherwise any cell that looks like a record id.
+func (v *queryView) recordIDForRow() string {
+	if id := v.table.Cell("Id"); recordIDPattern.MatchString(id) {
+		return id
+	}
+	row := v.table.CurrentRow()
+	for _, cell := range row {
+		if recordIDPattern.MatchString(cell) {
+			return cell
+		}
+	}
+	return ""
 }
 
 // collapse renders a multi-line query as one line for the compact editor.

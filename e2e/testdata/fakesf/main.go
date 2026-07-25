@@ -33,6 +33,8 @@ func main() {
 			{"username":"other@example.com","alias":"other","orgId":"00DOTH","instanceUrl":%q,"connectedStatus":"Connected","isSandbox":true}],
 			"scratchOrgs":[{"username":"scratchy@example.com","alias":"scratchy","orgId":"00DSCR","instanceUrl":%q,"status":"Active","expirationDate":"2026-08-15"}]}}`,
 			display("acme.my.salesforce.com"), display("acme--staging.sandbox.my.salesforce.com"), display("nimble-fox-8f2k.scratch.my.salesforce.com"))
+	case strings.HasPrefix(args, "org open"):
+		fmt.Printf(`{"status":0,"result":{"url":"https://example.my.salesforce.com","orgId":"00DE2E","username":"e2e@example.com"}}`)
 	case strings.HasPrefix(args, "org display"):
 		fmt.Printf(`{"status":0,"result":{"id":"00DE2E","accessToken":"E2E_TOKEN","instanceUrl":%q,"apiVersion":"64.0","username":"e2e@example.com","connectedStatus":"Connected"}}`, mock)
 	default:

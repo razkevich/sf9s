@@ -326,6 +326,22 @@ func (c *Client) OpenOrg(ctx context.Context, usernameOrAlias string) error {
 	return unwrap(out, nil)
 }
 
+// OpenPath opens a specific page of the org (e.g. a record) in the browser,
+// again letting the CLI own the session hand-off.
+func (c *Client) OpenPath(ctx context.Context, usernameOrAlias, path string) error {
+	if err := safeArg("org", usernameOrAlias); err != nil {
+		return err
+	}
+	if err := safeArg("path", path); err != nil {
+		return err
+	}
+	out, err := c.runner.Run(ctx, "org", "open", "-o", usernameOrAlias, "-p", path)
+	if err != nil {
+		return err
+	}
+	return unwrap(out, nil)
+}
+
 // MetadataTypes lists the metadata types the org supports.
 func (c *Client) MetadataTypes(ctx context.Context, usernameOrAlias string) ([]MetadataType, error) {
 	if err := safeArg("org", usernameOrAlias); err != nil {

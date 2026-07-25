@@ -395,3 +395,16 @@ func TestJourneySavedQueriesPicker(t *testing.T) {
 	h.key(tea.KeyEsc)
 	h.quit(t)
 }
+
+func TestJourneyOpenRecordFromResults(t *testing.T) {
+	h := start(t)
+	h.waitFor(t, "Authenticated orgs (3)")
+	h.key(tea.KeyEnter)
+	h.typeString("SELECT Id, Name FROM Account")
+	h.key(tea.KeyCtrlR)
+	h.waitFor(t, "Acme Rockets")
+
+	h.typeString("o")
+	h.waitFor(t, "opened 001E2E000000001")
+	h.quit(t)
+}
