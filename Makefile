@@ -2,10 +2,14 @@ BINARY  := sf9s
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -s -w -X main.version=$(VERSION)
 
-.PHONY: build test race lint vet fmt run clean
+.PHONY: build install test race lint vet fmt run clean
 
 build:
 	go build -trimpath -ldflags '$(LDFLAGS)' -o $(BINARY) ./cmd/sf9s
+
+# install stamps the version too — plain `go install` reports "dev".
+install:
+	go install -trimpath -ldflags '$(LDFLAGS)' ./cmd/sf9s
 
 test:
 	go test ./...
