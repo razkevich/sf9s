@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -31,7 +32,12 @@ func TestMain(m *testing.M) {
 	if err != nil {
 		panic(err)
 	}
-	fakeSfBin = filepath.Join(dir, "sf")
+	// exec.LookPath/Command needs the .exe suffix on Windows.
+	name := "sf"
+	if runtime.GOOS == "windows" {
+		name += ".exe"
+	}
+	fakeSfBin = filepath.Join(dir, name)
 	build := exec.Command("go", "build", "-o", fakeSfBin, "./testdata/fakesf")
 	out, err := build.CombinedOutput()
 	if err != nil {
