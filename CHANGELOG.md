@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v0.2.0 — 2026-07-25
 
 - **Live Apex log tail**: `t` on the logs view watches for new debug logs and
   prepends them as they arrive; stops on `t`, on leaving the view, on org
@@ -18,9 +18,12 @@
 - `R` reloads the schema and metadata views after a transient failure
 - Integration test tier against a live sf-localstack instance (`-tags localstack`)
 - Fixed: keystrokes typed immediately after selecting an org were dropped
-- Fixed: 25 findings from three adversarial reviews (cross-org response
-  handling, hidden 30 s HTTP timeout, paginated schema drift, escape-sequence
-  injection from org data, cache-path traversal, export hardening, and more)
+- Fixed: 34 findings across four adversarial reviews — cross-org response
+  handling, a hidden 30 s HTTP timeout, paginated schema drift, escape-sequence
+  injection from org data, cache-path traversal, export hardening, completion
+  cursor math on wrapped lines and wide runes, deleting the wrong Apex log when
+  one arrived mid-confirmation, keywords inside SOQL string literals, and a
+  stale cached org outliving its authentication
 
 ## v0.1.0 — 2026-07-25
 
