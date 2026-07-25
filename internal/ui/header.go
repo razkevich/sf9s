@@ -38,19 +38,14 @@ func (m *Model) headerHeight() int {
 	return headerRows
 }
 
-// hotkeyOrgs are the orgs reachable with a number key: the current org first
-// (so its number is stable while you work), then the rest in list order.
+// hotkeyOrgs are the orgs reachable with a number key. The order is the org
+// list's own, never most-recently-used: a number that points somewhere new
+// every time you switch is a number you can only press by accident.
 func (m *Model) hotkeyOrgs() []string {
 	titles := make([]string, 0, orgHotkeys)
-	if m.current != nil {
-		titles = append(titles, m.current.Title())
-	}
 	for _, o := range m.orgs {
 		if len(titles) >= orgHotkeys {
 			break
-		}
-		if m.current != nil && o.Username == m.current.Username {
-			continue
 		}
 		titles = append(titles, o.Title())
 	}
@@ -72,24 +67,26 @@ func (m *Model) header() string {
 	}
 
 	context := m.contextBlock()
-	keys := m.keyBlock()
 
-	// Narrow the header by degrees rather than dropping the org hotkeys, which
-	// are the fastest way to move around. The logo goes first, then the org
-	// block folds to one column, and only then is anything omitted.
+	// Narrow by degrees: drop the logo, fold the org hotkeys to one column,
+	// then show fewer key columns. Something from every block survives as
+	// long as possible, and the full key list is always one `?` away.
 	for _, blocks := range [][]string{
-		{context, keys, m.orgBlock(2), m.logoBlock()},
-		{context, keys, m.orgBlock(2)},
-		{context, keys, m.orgBlock(1)},
-		{context, m.orgBlock(1)},
-		{context},
+		{context, m.keyBlock(3), m.orgBlock(2), m.logoBlock()},
+		{context, m.keyBlock(3), m.orgBlock(2)},
+		{context, m.keyBlock(3), m.orgBlock(1)},
+		{context, m.keyBlock(2), m.orgBlock(1)},
+		{context, m.keyBlock(2)},
+		{context, m.keyBlock(1)},
 	} {
 		joined := lipgloss.JoinHorizontal(lipgloss.Top, blocks...)
 		if lipgloss.Width(joined) <= m.width {
 			return joined
 		}
 	}
-	return runeTrunc(context, m.width)
+	// Never render a header without keys: an undiscoverable app is worse
+	// than a cramped one, so fall back to the compact single-line bar.
+	return m.compactBar()
 }
 
 func (m *Model) contextBlock() string {
@@ -145,20 +142,34 @@ func (m *Model) contextBlock() string {
 
 // keyBlock lists what the current view can do right now, plus the global keys
 // that are easy to forget.
-func (m *Model) keyBlock() string {
+func (m *Model) keyBlock(cols int) string {
 	hints := append([]keyHint{}, m.currentView().Keys()...)
-	hints = append(hints,
-		keyHint{":", "command"},
-		keyHint{"?", "help"},
-		keyHint{"ctrl+a", "views"},
-	)
-	return renderKeyColumns(hints, headerRows, 3)
+	if m.currentView().Capturing() {
+		// While a view is taking text, ":" and "?" are just characters.
+		hints = append(hints,
+			keyHint{"f2", "command"},
+			keyHint{"f1", "help"},
+		)
+	} else {
+		hints = append(hints,
+			keyHint{":", "command"},
+			keyHint{"?", "help"},
+			keyHint{"ctrl+a", "views"},
+		)
+	}
+	return renderKeyColumns(hints, headerRows, cols)
 }
 
 // orgBlock renders the numbered org hotkeys in at most cols columns. Aliases
 // are truncated: the number is what you press, the name only has to be
 // recognizable.
 func (m *Model) orgBlock(cols int) string {
+	// Number keys act only on the orgs view, so advertise them only there —
+	// elsewhere they would promise something that does not happen, and the
+	// space is better spent on the keys that do work.
+	if m.active != ViewOrgs {
+		return ""
+	}
 	titles := m.hotkeyOrgs()
 	if len(titles) == 0 {
 		return ""
@@ -166,9 +177,12 @@ func (m *Model) orgBlock(cols int) string {
 	if cols == 1 {
 		titles = titles[:min(len(titles), headerRows)]
 	}
-	hints := make([]keyHint, 0, len(titles))
+	hints := make([]keyHint, 0, len(titles)+1)
 	for i, t := range titles {
 		hints = append(hints, keyHint{fmt.Sprintf("%d", i+1), runewidth.Truncate(t, 14, "…")})
+	}
+	if rest := len(m.orgs) - len(titles); rest > 0 && cols > 1 {
+		hints = append(hints, keyHint{":org", fmt.Sprintf("+%d more", rest)})
 	}
 	return renderKeyColumns(hints, headerRows, cols)
 }

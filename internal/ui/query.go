@@ -49,6 +49,10 @@ type queryView struct {
 
 	card *detailCard
 
+	// lastErr is the failure of the most recent run, shown until the next
+	// successful one so it cannot be mistaken for an empty result.
+	lastErr error
+
 	comp  *completer
 	popup *completionPopup
 	// pendingComplete remembers an explicit completion request made while
@@ -82,7 +86,7 @@ func (v *queryView) Keys() []keyHint {
 	}
 	if v.focusResults {
 		return []keyHint{
-			{"tab", "edit query"},
+			{"tab", "back to editor"},
 			{"enter", "inspect row"},
 			{"y/Y", "copy cell/row"},
 			{"s", "sort column"},
@@ -92,13 +96,18 @@ func (v *queryView) Keys() []keyHint {
 			{"/", "filter"},
 		}
 	}
-	return []keyHint{
+	editing := []keyHint{
 		{"ctrl+r", "run"},
 		{"tab", "complete"},
 		{"ctrl+t", "toggle tooling"},
 		{"ctrl+p/n", "history"},
 		{"ctrl+s", "saved queries"},
+		{"ctrl+u", "clear"},
 	}
+	if v.table.RowCount() > 0 {
+		editing = append(editing, keyHint{"shift+tab", "go to results"})
+	}
+	return editing
 }
 
 func (v *queryView) Bail() bool {
@@ -166,6 +175,7 @@ func (v *queryView) runQuery() tea.Cmd {
 	v.gen = v.app.nextGen()
 	gen := v.gen
 	v.running = true
+	v.lastErr = nil
 	client := v.app.client
 	tooling := v.tooling
 	store := v.app.deps.Store
@@ -216,8 +226,10 @@ func (v *queryView) Update(msg tea.Msg) tea.Cmd {
 			v.history = msg.history
 		}
 		if msg.err != nil {
+			v.lastErr = msg.err
 			return toastErr(msg.err)
 		}
+		v.lastErr = nil
 		v.elapsed = msg.elapsed
 		if msg.more {
 			added := len(msg.res.Rows)
@@ -243,10 +255,8 @@ func (v *queryView) Update(msg tea.Msg) tea.Cmd {
 		v.fetched = len(msg.res.Rows)
 		v.table.SetData(msg.res.Columns, msg.res.Rows)
 		v.table.emptyText = fmt.Sprintf("0 rows (totalSize %d)", msg.res.TotalSize)
-		v.focusResults = len(msg.res.Rows) > 0
-		if v.focusResults {
-			v.editor.Blur()
-		}
+		// Focus stays in the editor: silently moving it to the table turns a
+		// half-typed next query into a stream of single-key commands.
 		return toast(statusOK, fmt.Sprintf("%d/%d rows in %s", v.fetched, msg.res.TotalSize, msg.elapsed.Round(time.Millisecond)))
 
 	case tea.KeyMsg:
@@ -473,13 +483,11 @@ func (v *queryView) handleKey(msg tea.KeyMsg) tea.Cmd {
 			v.comp.clearError()
 			return v.openPopup(true)
 		}
-		v.focusResults = !v.focusResults
-		if v.focusResults {
-			v.editor.Blur()
-		} else {
-			v.editor.Focus()
-		}
-		return nil
+		return v.toggleFocus()
+	case "shift+tab":
+		// Always a pane switch: after running a query the cursor sits at the
+		// end of a word, so plain tab would only ever try to complete.
+		return v.toggleFocus()
 	}
 
 	if v.focusResults {
@@ -556,6 +564,20 @@ func (v *queryView) handleKey(msg tea.KeyMsg) tea.Cmd {
 		return tea.Batch(cmd, v.refreshPopup())
 	}
 	return cmd
+}
+
+// toggleFocus moves between the editor and the results table.
+func (v *queryView) toggleFocus() tea.Cmd {
+	if !v.focusResults && v.table.RowCount() == 0 {
+		return toast(statusInfo, "no results to move to yet")
+	}
+	v.focusResults = !v.focusResults
+	if v.focusResults {
+		v.editor.Blur()
+		return nil
+	}
+	v.editor.Focus()
+	return nil
 }
 
 func (v *queryView) histMove(dir int) tea.Cmd {
@@ -679,6 +701,13 @@ func collapse(q string) string {
 	return strings.Join(strings.Fields(q), " ")
 }
 
+// oneLine flattens a message for single-line display. Salesforce error bodies
+// are frequently multi-line, and extra lines push the app's own chrome off
+// the screen.
+func oneLine(s string) string {
+	return strings.Join(strings.Fields(s), " ")
+}
+
 // csvSafe neutralizes leading characters that spreadsheet apps execute as
 // formulas, so exported org data can't run on open.
 func csvSafe(s string) string {
@@ -787,7 +816,9 @@ func (v *queryView) View(width, height int) string {
 	}
 
 	resultHead := ""
-	if v.result != nil {
+	if v.lastErr != nil {
+		resultHead = styleErrText.Render("✖ " + runewidth.Truncate(oneLine(v.lastErr.Error()), max(width-4, 20), "…"))
+	} else if v.result != nil {
 		resultHead = styleDim.Render(fmt.Sprintf("%d/%d rows • %s", v.fetched, v.result.TotalSize, v.elapsed.Round(time.Millisecond)))
 		if v.result.NextRecordsURL != "" {
 			resultHead += styleDim.Render(" • m = more")

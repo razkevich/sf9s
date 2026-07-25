@@ -248,6 +248,9 @@ func (m *Model) setOrg(org sfcli.Org) {
 		qv.resetOrg()
 	}
 	m.pendingOrgInfo = m.loadOrgInfo(o)
+	if ov, ok := m.views[ViewOrgs].(*orgsView); ok {
+		ov.setOrgs(m.orgs) // move the ● to the org we just switched to
+	}
 }
 
 const orgInfoTTL = 24 * time.Hour
@@ -458,6 +461,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case statusMsg:
+		msg.text = oneLine(msg.text)
 		m.status = msg
 		m.statusSeq++
 		m.statusUntil = time.Now().Add(5 * time.Second)
@@ -610,6 +614,18 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	v := m.currentView()
+	// f1/f2 work even while a view is capturing text: in the query editor
+	// ":" and "?" are query characters, so a user typing SOQL would otherwise
+	// have no way to reach help or command mode at all.
+	switch msg.String() {
+	case "f1":
+		m.showHelp = true
+		m.helpView.SetContent(m.active, v.Keys())
+		return m, nil
+	case "f2":
+		m.palette.Open()
+		return m, nil
+	}
 	if v.Capturing() {
 		return m, v.Update(msg)
 	}
@@ -638,10 +654,15 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, m.popCrumb()
 	case "1", "2", "3", "4", "5", "6", "7", "8", "9":
-		if cmd := m.switchOrgByHotkey(key); cmd != nil {
-			return m, cmd
+		// Only on the orgs view. Elsewhere a digit is far more likely to be
+		// part of something the user is typing than a request to retarget
+		// every subsequent action at a different org.
+		if m.active == ViewOrgs {
+			if cmd := m.switchOrgByHotkey(key); cmd != nil {
+				return m, cmd
+			}
+			return m, nil
 		}
-		return m, nil
 	}
 	return m, v.Update(msg)
 }

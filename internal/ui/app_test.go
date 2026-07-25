@@ -275,8 +275,8 @@ func TestQueryFlowEndToEnd(t *testing.T) {
 	if !strings.Contains(view, "Acme") || !strings.Contains(view, "Globex") {
 		t.Fatalf("query results should render:\n%s", view)
 	}
-	if !qv.focusResults {
-		t.Fatal("focus should move to results after a successful query")
+	if qv.focusResults {
+		t.Fatal("focus must stay in the editor; stealing it turns typing into commands")
 	}
 	if got := m.deps.Store.History(); len(got) != 1 || got[0] != "SELECT Id, Name FROM Account" {
 		t.Fatalf("query should be persisted to history: %v", got)

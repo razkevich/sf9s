@@ -146,6 +146,9 @@ func TestJourneyOrgsQueryExport(t *testing.T) {
 	// Results: rows, count toast, flattened relationship column.
 	h.waitFor(t, "Acme Rockets", "3/3 rows", "Owner.Name")
 
+	// Focus stays in the editor after a run; shift+tab moves to the results.
+	h.key(tea.KeyShiftTab)
+
 	// Row card shows the full record vertically.
 	h.key(tea.KeyEnter)
 	h.waitFor(t, "AnnualRevenue", "12000000")
@@ -185,6 +188,7 @@ func TestJourneyPagination(t *testing.T) {
 	h.typeString("SELECT Id, LastName FROM Contact")
 	h.key(tea.KeyCtrlR)
 	h.waitFor(t, "Page1Row", "1/4000 rows")
+	h.key(tea.KeyShiftTab)
 	h.typeString("m")
 	h.waitFor(t, "Page2Row", "2/4000")
 	h.quit(t)
@@ -291,6 +295,7 @@ func TestJourneyCopyRecordFromCard(t *testing.T) {
 	h.typeString("SELECT Id, Name FROM Account")
 	h.key(tea.KeyCtrlR)
 	h.waitFor(t, "Acme Rockets")
+	h.key(tea.KeyShiftTab)
 
 	h.key(tea.KeyEnter) // open the record card
 	h.waitFor(t, "y copy JSON")
@@ -369,6 +374,7 @@ func TestJourneyCopyCellAndRow(t *testing.T) {
 	h.typeString("SELECT Id, Name FROM Account")
 	h.key(tea.KeyCtrlR)
 	h.waitFor(t, "Acme Rockets")
+	h.key(tea.KeyShiftTab)
 
 	h.typeString("y")
 	h.waitFor(t, "copied cell")
@@ -403,6 +409,7 @@ func TestJourneyOpenRecordFromResults(t *testing.T) {
 	h.typeString("SELECT Id, Name FROM Account")
 	h.key(tea.KeyCtrlR)
 	h.waitFor(t, "Acme Rockets")
+	h.key(tea.KeyShiftTab)
 
 	h.typeString("o")
 	h.waitFor(t, "opened 001E2E000000001")

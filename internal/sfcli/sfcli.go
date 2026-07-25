@@ -10,9 +10,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"os/exec"
 	"sort"
 	"strings"
+	"syscall"
+	"time"
 )
 
 var (
@@ -65,6 +68,24 @@ func (r ExecRunner) Run(ctx context.Context, args ...string) ([]byte, error) {
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
+	// `sf` is a Node program that spawns helpers (telemetry, update checks).
+	// Capturing output via pipes means Run() waits for every writer to close
+	// them, so one orphaned grandchild would hang sf9s forever — past any
+	// context deadline, because the deadline kills a process that already
+	// exited. WaitDelay bounds that wait; the process group lets a cancel
+	// take the helpers with it.
+	cmd.WaitDelay = 2 * time.Second
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error {
+		if cmd.Process == nil {
+			return nil
+		}
+		// Negative pid signals the whole group.
+		if err := syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL); err != nil {
+			return cmd.Process.Kill()
+		}
+		return nil
+	}
 	err := cmd.Run()
 	if err != nil {
 		var execErr *exec.Error
@@ -137,17 +158,34 @@ func (o Org) Title() string {
 	return o.Username
 }
 
-// Type returns a short human label for the org flavor.
+// Type returns a short human label for the org flavor. `sf org list` reports
+// isSandbox as null for some orgs, so the instance host is used as a second
+// source: it names the org's nature reliably and costs nothing.
 func (o Org) Type() string {
 	switch {
-	case o.IsScratch:
+	case o.IsScratch || strings.Contains(o.InstanceURL, ".scratch."):
 		return "scratch"
+	case o.IsSandbox || strings.Contains(o.InstanceURL, ".sandbox."):
+		return "sandbox"
+	case strings.Contains(o.InstanceURL, "-dev-ed.") || strings.Contains(o.InstanceURL, ".develop."):
+		return "developer"
 	case o.IsDevHub:
 		return "devhub"
-	case o.IsSandbox:
-		return "sandbox"
 	default:
 		return "org"
+	}
+}
+
+// MaybeProduction reports whether nothing about this org rules out production.
+// It is deliberately pessimistic: the definitive answer needs the org's own
+// Organization record, and until that arrives an unmarked org is treated as
+// possibly live.
+func (o Org) MaybeProduction() bool {
+	switch o.Type() {
+	case "scratch", "sandbox", "developer":
+		return false
+	default:
+		return true
 	}
 }
 
@@ -297,6 +335,11 @@ func (c *Client) orgs(ctx context.Context, skipStatus bool) ([]Org, error) {
 
 // Credentials resolves a fresh access token for the org; the sf CLI
 // transparently refreshes expired tokens during this call.
+//
+// Salesforce CLI 2.136.8 (May 2026) stopped returning credentials from
+// `org display` and added `org auth show-access-token` for callers that need
+// them, so the token is fetched separately whenever it is missing. Older CLIs
+// still include it, and are handled by the same path costing one process.
 func (c *Client) Credentials(ctx context.Context, usernameOrAlias string) (Credentials, error) {
 	if err := safeArg("org", usernameOrAlias); err != nil {
 		return Credentials{}, err
@@ -310,7 +353,49 @@ func (c *Client) Credentials(ctx context.Context, usernameOrAlias string) (Crede
 		return Credentials{}, err
 	}
 	creds.InstanceURL = strings.TrimSuffix(creds.InstanceURL, "/")
+	if creds.AccessToken == "" {
+		token, err := c.accessToken(ctx, usernameOrAlias)
+		if err != nil {
+			return Credentials{}, err
+		}
+		creds.AccessToken = token
+	}
 	return creds, nil
+}
+
+// accessToken asks the CLI for the org's token directly.
+func (c *Client) accessToken(ctx context.Context, usernameOrAlias string) (string, error) {
+	out, err := c.runner.Run(ctx, "org", "auth", "show-access-token", "-o", usernameOrAlias)
+	if err != nil {
+		return "", err
+	}
+	var raw json.RawMessage
+	if err := unwrap(out, &raw); err != nil {
+		var cliErr *CLIError
+		if errors.As(err, &cliErr) && strings.Contains(strings.ToLower(cliErr.Message), "not found") {
+			return "", fmt.Errorf("this Salesforce CLI hides access tokens and has no `org auth show-access-token`; upgrade the CLI (npm install -g @salesforce/cli)")
+		}
+		return "", err
+	}
+	// The command returns a bare string; accept an object too in case that
+	// changes again.
+	var token string
+	if err := json.Unmarshal(raw, &token); err == nil && token != "" {
+		return token, nil
+	}
+	var obj struct {
+		AccessToken string `json:"accessToken"`
+		Token       string `json:"token"`
+	}
+	if err := json.Unmarshal(raw, &obj); err == nil {
+		if obj.AccessToken != "" {
+			return obj.AccessToken, nil
+		}
+		if obj.Token != "" {
+			return obj.Token, nil
+		}
+	}
+	return "", fmt.Errorf("could not read an access token for %s from the sf CLI", usernameOrAlias)
 }
 
 // OpenOrg launches the org in a browser via the CLI, so the session token
@@ -384,6 +469,14 @@ func (c *Client) ListMetadata(ctx context.Context, usernameOrAlias, metadataType
 		}
 		if single.FullName != "" {
 			components = []MetadataComponent{single}
+		}
+	}
+	for i := range components {
+		// Salesforce percent-encodes names in listMetadata, so a layout called
+		// "Account (Marketing)" arrives as "Account %28Marketing%29" and is
+		// unfindable by the name the user knows.
+		if decoded, err := url.QueryUnescape(components[i].FullName); err == nil {
+			components[i].FullName = decoded
 		}
 	}
 	sort.Slice(components, func(i, j int) bool {

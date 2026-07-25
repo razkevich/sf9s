@@ -3,7 +3,12 @@ package sfcli
 import (
 	"context"
 	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 )
 
 type fakeRunner struct {
@@ -179,5 +184,127 @@ func TestUnwrapGarbage(t *testing.T) {
 	c := New(fakeRunner{out: map[string][]byte{"org list": []byte("not json at all")}})
 	if _, err := c.Orgs(context.Background()); err == nil {
 		t.Fatal("want error on garbage output")
+	}
+}
+
+func TestListMetadataDecodesNames(t *testing.T) {
+	c := New(fakeRunner{out: map[string][]byte{
+		"org list metadata -m Layout -o qa": []byte(`{"status":0,"result":[
+			{"fullName":"Account-Account %28Marketing%29 Layout","type":"Layout"},
+			{"fullName":"Case-Case %5BSupport%5D Layout","type":"Layout"}]}`),
+	}})
+	comps, err := c.ListMetadata(context.Background(), "qa", "Layout")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if comps[0].FullName != "Account-Account (Marketing) Layout" {
+		t.Errorf("percent-encoded name not decoded: %q", comps[0].FullName)
+	}
+	if comps[1].FullName != "Case-Case [Support] Layout" {
+		t.Errorf("percent-encoded name not decoded: %q", comps[1].FullName)
+	}
+}
+
+func TestOrgTypeUsesInstanceHostWhenFlagsAreMissing(t *testing.T) {
+	cases := []struct {
+		url  string
+		want string
+		prod bool
+	}{
+		{"https://acme--dev.sandbox.my.salesforce.com", "sandbox", false},
+		{"https://cool-fox.scratch.my.salesforce.com", "scratch", false},
+		{"https://acme-dev-ed.my.salesforce.com", "developer", false},
+		{"https://acme.develop.my.salesforce.com", "developer", false},
+		{"https://acme.my.salesforce.com", "org", true},
+	}
+	for _, tc := range cases {
+		o := Org{InstanceURL: tc.url}
+		if got := o.Type(); got != tc.want {
+			t.Errorf("%s → Type() = %q, want %q", tc.url, got, tc.want)
+		}
+		if got := o.MaybeProduction(); got != tc.prod {
+			t.Errorf("%s → MaybeProduction() = %v, want %v", tc.url, got, tc.prod)
+		}
+	}
+}
+
+// Salesforce CLI 2.136.8 removed credentials from `org display`. sf9s must
+// keep working on both sides of that change.
+func TestCredentialsFallsBackToShowAccessToken(t *testing.T) {
+	c := New(fakeRunner{out: map[string][]byte{
+		"org display -o qa":                []byte(`{"status":0,"result":{"id":"00DQA","instanceUrl":"https://corp--qa.sandbox.my.salesforce.com","apiVersion":"64.0","username":"alex@corp.com.qa"}}`),
+		"org auth show-access-token -o qa": []byte(`{"status":0,"result":"00DQA!FRESH_TOKEN"}`),
+	}})
+	creds, err := c.Credentials(context.Background(), "qa")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if creds.AccessToken != "00DQA!FRESH_TOKEN" {
+		t.Fatalf("token not resolved from the new command: %+v", creds)
+	}
+	if creds.InstanceURL == "" || creds.APIVersion != "64.0" {
+		t.Fatalf("the rest of the credentials must still come from org display: %+v", creds)
+	}
+}
+
+func TestCredentialsUsesOrgDisplayTokenWhenPresent(t *testing.T) {
+	// Older CLIs still include it; that must not cost a second process.
+	c := New(fakeRunner{out: map[string][]byte{
+		"org display -o qa": []byte(`{"status":0,"result":{"accessToken":"00DQA!OLD","instanceUrl":"https://x","apiVersion":"64.0"}}`),
+	}})
+	creds, err := c.Credentials(context.Background(), "qa")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if creds.AccessToken != "00DQA!OLD" {
+		t.Fatalf("got %q", creds.AccessToken)
+	}
+}
+
+func TestCredentialsExplainsAnOldCLIWithoutTheCommand(t *testing.T) {
+	c := New(fakeRunner{out: map[string][]byte{
+		"org display -o qa":                []byte(`{"status":0,"result":{"instanceUrl":"https://x","apiVersion":"64.0"}}`),
+		"org auth show-access-token -o qa": []byte(`{"status":1,"name":"CommandError","message":"Command org:auth:show-access-token not found."}`),
+	}})
+	_, err := c.Credentials(context.Background(), "qa")
+	if err == nil || !strings.Contains(err.Error(), "upgrade the CLI") {
+		t.Fatalf("want an actionable message, got %v", err)
+	}
+}
+
+func TestAccessTokenAcceptsObjectShape(t *testing.T) {
+	c := New(fakeRunner{out: map[string][]byte{
+		"org display -o qa":                []byte(`{"status":0,"result":{"instanceUrl":"https://x","apiVersion":"64.0"}}`),
+		"org auth show-access-token -o qa": []byte(`{"status":0,"result":{"accessToken":"00DQA!OBJ"}}`),
+	}})
+	creds, err := c.Credentials(context.Background(), "qa")
+	if err != nil || creds.AccessToken != "00DQA!OBJ" {
+		t.Fatalf("creds=%+v err=%v", creds, err)
+	}
+}
+
+// A `sf` whose grandchild outlives it must not hang sf9s: output is captured
+// through pipes, and Run waits for every writer to close them.
+func TestExecRunnerDoesNotHangOnOrphanedGrandchild(t *testing.T) {
+	dir := t.TempDir()
+	script := filepath.Join(dir, "sf")
+	body := "#!/bin/sh\nsleep 60 &\nprintf '%s'\nexit 0\n"
+	payload := `{"status":0,"result":{"nonScratchOrgs":[],"scratchOrgs":[]}}`
+	if err := os.WriteFile(script, []byte(fmt.Sprintf(body, payload)), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := ExecRunner{Bin: script}.Run(context.Background(), "org", "list")
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("run failed: %v", err)
+		}
+	case <-time.After(20 * time.Second):
+		t.Fatal("Run did not return: an orphaned grandchild is holding the output pipe open")
 	}
 }

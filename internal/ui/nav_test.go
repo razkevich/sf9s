@@ -2,6 +2,8 @@ package ui
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -46,11 +48,15 @@ func TestNumberKeysSwitchOrg(t *testing.T) {
 	if !strings.Contains(m.View(), "switched to "+switched) {
 		t.Errorf("switch should be announced:\n%s", m.View())
 	}
-	if got := m.orgForHotkey(1); got != switched {
-		t.Errorf("after switching, hotkey 1 should be the new org, got %q", got)
+	// The mapping must not follow the active org around.
+	if got := m.orgForHotkey(1); got != "prod" {
+		t.Errorf("hotkey 1 moved after a switch: %q", got)
+	}
+	if got := m.orgForHotkey(2); got != switched {
+		t.Errorf("hotkey 2 should still be the org it switched to, got %q", got)
 	}
 
-	drive(t, m, key("1"))
+	drive(t, m, key("2"))
 	if !strings.Contains(m.View(), "already on "+switched) {
 		t.Errorf("pressing the current org's key should say so:\n%s", m.View())
 	}
@@ -209,6 +215,9 @@ func TestHeaderKeepsOrgHotkeysWhenNarrow(t *testing.T) {
 
 	for _, width := range []int{130, 110, 95} {
 		m.width, m.height = width, 40
+		if m.active != ViewOrgs {
+			t.Fatal("precondition: on the orgs view, where the numbers work")
+		}
 		view := m.View()
 		if !strings.Contains(view, "<1>") {
 			t.Errorf("width %d dropped the org hotkeys:\n%s", width, view)
@@ -292,5 +301,148 @@ func TestOrgListLabelsProductionWhenKnown(t *testing.T) {
 	// And an org we have never opened stays honestly unlabelled.
 	if strings.Count(view, "PRODUCTION") != 1 {
 		t.Fatalf("only the org we asked about should be labelled:\n%s", view)
+	}
+}
+
+// Regression for the most dangerous behaviour found in review: after running
+// a query, focus stayed in the results table, so typing the next query fired
+// single-key commands — and a digit silently retargeted every later action at
+// a different org.
+func TestTypingAfterAQueryCannotSwitchOrg(t *testing.T) {
+	m := multiOrgModel(t)
+	qv := queryViewFor(t, m)
+	qv.setEditorText("SELECT Id FROM Account")
+	drive(t, m, key("ctrl+r"))
+
+	if qv.focusResults {
+		t.Fatal("focus must stay in the editor after a run, not jump to the table")
+	}
+	startOrg := m.current.Title()
+	for _, r := range "SELECT Id FROM Contact LIMIT 5" {
+		drive(t, m, key(string(r)))
+	}
+	if m.current.Title() != startOrg {
+		t.Fatalf("typing a query switched org from %q to %q", startOrg, m.current.Title())
+	}
+	if got := qv.editor.Value(); got != "SELECT Id FROM AccountSELECT Id FROM Contact LIMIT 5" {
+		t.Fatalf("every character should have reached the editor, got %q", got)
+	}
+}
+
+func TestOrgHotkeysAreOrgsViewOnly(t *testing.T) {
+	m := multiOrgModel(t)
+	start := m.current.Title()
+	drive(t, m, switchViewMsg{id: ViewLimits})
+	if strings.Contains(m.View(), "<1> ") {
+		t.Errorf("org numbers must not be advertised where they do nothing:\n%s", m.View())
+	}
+	drive(t, m, key("2"))
+	if m.current.Title() != start {
+		t.Fatalf("a digit outside the orgs view switched org to %q", m.current.Title())
+	}
+	drive(t, m, switchViewMsg{id: ViewOrgs})
+	drive(t, m, key("2"))
+	if m.current.Title() == start {
+		t.Fatal("on the orgs view a digit should switch org")
+	}
+}
+
+func TestHotkeyNumbersAreStable(t *testing.T) {
+	m := multiOrgModel(t)
+	before := m.hotkeyOrgs()
+	drive(t, m, key("3"))
+	after := m.hotkeyOrgs()
+	if len(before) != len(after) {
+		t.Fatalf("hotkey list changed length: %v → %v", before, after)
+	}
+	for i := range before {
+		if before[i] != after[i] {
+			t.Fatalf("hotkey %d moved from %q to %q — numbers must not renumber themselves",
+				i+1, before[i], after[i])
+		}
+	}
+}
+
+func TestQueryErrorStaysVisibleAndClearsStaleResults(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte(`[{"message":"unexpected token: 'FRM'\nposition 10","errorCode":"MALFORMED_QUERY"}]`))
+	}))
+	defer srv.Close()
+	m := newTestModel(t, srv.URL)
+	loadAllOrgs(t, m)
+	qv := queryViewFor(t, m)
+	qv.setEditorText("SELECT Id FRM Account")
+	drive(t, m, key("ctrl+r"))
+
+	// The toast fades; the error must not.
+	drive(t, m, clearStatusMsg{id: m.statusSeq})
+	view := m.View()
+	if !strings.Contains(view, "unexpected token") {
+		t.Fatalf("the failure must stay on screen after the toast fades:\n%s", view)
+	}
+	// A multi-line API message must not add rows and push the frame off screen.
+	for _, line := range strings.Split(view, "\n") {
+		if strings.Contains(line, "position 10") && !strings.Contains(line, "unexpected token") {
+			t.Errorf("error rendered across lines, which scrolls the app:\n%s", view)
+		}
+	}
+	if lines := strings.Count(view, "\n") + 1; lines > m.height {
+		t.Errorf("view is %d lines in a %d-line terminal", lines, m.height)
+	}
+}
+
+func TestHelpFitsAndScrollsOnASmallTerminal(t *testing.T) {
+	m := multiOrgModel(t)
+	m.width, m.height = 80, 24
+	drive(t, m, key("?"))
+
+	view := m.View()
+	if lines := strings.Count(view, "\n") + 1; lines > 24 {
+		t.Fatalf("help rendered %d lines into a 24-line terminal", lines)
+	}
+	// The box must be closed and the affordance visible, not silently clipped.
+	if !strings.Contains(view, "╰") {
+		t.Errorf("help box has no bottom border — it is being clipped:\n%s", view)
+	}
+	if !strings.Contains(view, "more below") {
+		t.Errorf("clipped help must say there is more:\n%s", view)
+	}
+
+	// Scrolling keys keep it open and reach the end.
+	for i := 0; i < 12; i++ {
+		drive(t, m, key("j"))
+	}
+	if !m.showHelp {
+		t.Fatal("scrolling must not close the help overlay")
+	}
+	view = m.View()
+	if !strings.Contains(view, "pgup / pgdn") {
+		t.Errorf("the last entries should be reachable by scrolling:\n%s", view)
+	}
+	if !strings.Contains(view, "▴ end") {
+		t.Errorf("the end of the list should say so:\n%s", view)
+	}
+
+	drive(t, m, key("x"))
+	if m.showHelp {
+		t.Error("a non-scrolling key should still close help")
+	}
+}
+
+func TestHelpListsKeysTheViewActuallyHas(t *testing.T) {
+	m := multiOrgModel(t)
+	m.width, m.height = 120, 45
+	drive(t, m, switchViewMsg{id: ViewQuery})
+	// The editor takes "?" as a character, so f1 is the way in from there.
+	drive(t, m, tea.KeyMsg{Type: tea.KeyF1})
+	if !m.showHelp {
+		t.Fatal("f1 must open help even while the editor has focus")
+	}
+	view := m.View()
+	for _, want := range []string{"shift+tab", "ctrl+u", "open the record", "copy cell / row"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("help is missing %q:\n%s", want, view)
+		}
 	}
 }

@@ -56,9 +56,13 @@ func (v *orgsView) setOrgs(orgs []sfcli.Org) {
 	v.orgs = orgs
 	rows := make([][]string, len(orgs))
 	for i, o := range orgs {
+		// ● marks the org sf9s is using — the one every other key acts on.
+		// The CLI's own default is a different thing and is marked ·.
 		marker := ""
-		if o.IsDefault {
+		if v.app.current != nil && o.Username == v.app.current.Username {
 			marker = "●"
+		} else if o.IsDefault {
+			marker = "·"
 		}
 		if o.IsDefaultHub {
 			marker += "★"
@@ -69,6 +73,8 @@ func (v *orgsView) setOrgs(orgs []sfcli.Org) {
 		}
 		// Prefer what the org said about itself over the CLI's coarse flags:
 		// "production" and "developer" both look like "org" to the CLI.
+		// Instant, from the instance host; upgraded to the authoritative
+		// answer once the org has told us what it is.
 		kind := o.Type()
 		if info := v.app.orgInfo[o.OrgID]; info != nil {
 			if info.Production() {
@@ -76,12 +82,19 @@ func (v *orgsView) setOrgs(orgs []sfcli.Org) {
 			} else if e := info.Edition(); e != "" {
 				kind = e
 			}
+		} else if o.MaybeProduction() {
+			kind = "org?"
 		}
 		rows[i] = []string{marker, o.Title(), o.Username, kind, status, o.ExpirationDate, o.InstanceURL}
 	}
 	v.table.SetDataPreservingView([]string{" ", "Alias", "Username", "Type", "Status", "Expires", "Instance URL"}, rows)
-	if cursorUser != "" {
+	switch {
+	case cursorUser != "":
 		v.table.FocusRowWhere(2, cursorUser)
+	case v.app.current != nil:
+		// First paint: start on the org we are actually using, so -o and the
+		// default org agree with what enter/o/y will act on.
+		v.table.FocusRowWhere(2, v.app.current.Username)
 	}
 }
 
