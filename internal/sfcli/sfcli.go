@@ -163,6 +163,10 @@ func (o Org) Title() string {
 // source: it names the org's nature reliably and costs nothing.
 func (o Org) Type() string {
 	switch {
+	case strings.HasPrefix(o.InstanceURL, "http://localhost"),
+		strings.HasPrefix(o.InstanceURL, "http://127.0.0.1"):
+		// A local emulator is nobody's production org.
+		return "local"
 	case o.IsScratch || strings.Contains(o.InstanceURL, ".scratch."):
 		return "scratch"
 	case o.IsSandbox || strings.Contains(o.InstanceURL, ".sandbox."):
@@ -182,7 +186,7 @@ func (o Org) Type() string {
 // possibly live.
 func (o Org) MaybeProduction() bool {
 	switch o.Type() {
-	case "scratch", "sandbox", "developer":
+	case "scratch", "sandbox", "developer", "local":
 		return false
 	default:
 		return true

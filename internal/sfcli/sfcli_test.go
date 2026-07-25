@@ -216,6 +216,8 @@ func TestOrgTypeUsesInstanceHostWhenFlagsAreMissing(t *testing.T) {
 		{"https://acme-dev-ed.my.salesforce.com", "developer", false},
 		{"https://acme.develop.my.salesforce.com", "developer", false},
 		{"https://acme.my.salesforce.com", "org", true},
+		{"http://localhost:8080", "local", false},
+		{"http://127.0.0.1:52732", "local", false},
 	}
 	for _, tc := range cases {
 		o := Org{InstanceURL: tc.url}

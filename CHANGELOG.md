@@ -2,6 +2,54 @@
 
 ## Unreleased
 
+Four independent reviews — a Salesforce developer, an admin/consultant, a
+product strategist and a QA engineer — test-drove the app against a mock org
+and 13 real ones. This release is what they found.
+
+### Fixed — would have broken for most users
+
+- **Access tokens on current Salesforce CLIs.** CLI 2.136.8 removed
+  credentials from `sf org display`, which sf9s depended on entirely. It now
+  falls back to `org auth show-access-token`, and says what to do on CLIs that
+  have neither.
+- **A permanent startup hang.** `sf` spawns helper processes; capturing output
+  through pipes meant one orphaned grandchild blocked forever, past every
+  timeout. Bounded, and cancellation now kills the process group.
+- **Typing a query could silently switch org.** Focus moved to the results
+  table after a run, so the next query's keystrokes became commands — a digit
+  retargeted everything at another org. Focus stays in the editor, `shift+tab`
+  moves to results, and org hotkeys work only on the orgs view.
+- **The help overlay was clipped** on an 80x24 terminal — no bottom border, no
+  close hint, five keys missing. It scrolls now. `f1`/`f2` reach help and
+  command mode from inside the editor, where `?` and `:` are query characters.
+
+### Added
+
+- **Deploy failure details**: `enter` lists component and Apex test failures
+  with line numbers; `enter` again shows one in full with its stack trace.
+- **Field detail card**: `enter` on a field shows the complete picklist, the
+  field's identity and whether it is required; `y` copies the values.
+- **Org detail card** (`d`): everything known about an org plus the *full*
+  connection status, translated into a diagnosis and a next step.
+- **Production awareness**: sf9s asks the org what edition it is and marks
+  production unmistakably; sandbox/scratch/developer/local are inferred from
+  the instance host immediately.
+- Sortable columns (`s`), open the focused record in Salesforce (`o`),
+  `:org <alias>` to reach orgs beyond the numbered nine, copy cell/row/record.
+
+### Changed
+
+- Exports go to `~/Downloads` (`SF9S_EXPORT_DIR` overrides) and the path stays
+  on screen instead of a four-second toast.
+- Credentials are resolved when you pick an org, so the first query is no
+  longer billed ~9s of CLI startup.
+- Query failures stay visible instead of reverting to a message identical to
+  "never ran"; stale limits are labelled with the time they were last good.
+- `Flags` (`ncu`/`cu`) became a `Required` column and readable badges.
+- Metadata names are percent-decoded, so `(Marketing)` is findable.
+
+## Unreleased
+
 - **k9s-style navigation.** The header now carries an org context block, the
   current view's key legend, and numbered org hotkeys (`1`…`9`) — where k9s
   puts numbered namespaces. Command mode gained aliases (`:sc`, `:lim`, `:md`,
