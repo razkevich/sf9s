@@ -60,3 +60,43 @@ The pattern in the confirmed ones is instructive:
 - No `--help`-level docs for the CLI flags; no man page.
 - Limits view is a flat list; the interesting question ("what changed since
   yesterday?") isn't answerable.
+
+## Round 2 → autocomplete + instant startup
+
+### Delivered
+Two-phase org load (25 s → sub-second with a warm cache), SOQL autocomplete
+driven by a purpose-built tokenizer, cell/row copy, and an integration tier
+against a live sf-localstack.
+
+### Lessons
+- **Async state changes swallow input.** Selecting an org through a `tea.Cmd`
+  meant the following keystrokes were still delivered to the previous view, so
+  `SELECT …` became `ELECT …`. Any state change a user immediately types into
+  must be applied in the same `Update` call. Our permissive mock (which
+  matched any query containing `FROM Account`) had hidden this for days.
+- **Test doubles should be as strict as the real thing.** After making the mock
+  reject non-`SELECT` statements, that class of bug can't hide again.
+- **Portability is a CI property.** The Windows job caught a missing `.exe`
+  suffix on the test double; no amount of local testing would have.
+- **Measure before optimizing the wrong thing.** The startup problem wasn't our
+  code at all — `sf org list` probes every org serially. Skipping the probe and
+  filling statuses in afterward was a 10-line change worth more than any
+  micro-optimization we could have made.
+
+## Round 3 → tail, help, release polish
+
+### Delivered
+Live Apex log tail, a `--help` that actually onboards, record copy from the
+inspector card, popup layout that keeps results visible.
+
+### Lessons
+- **Background work needs an explicit owner and an explicit stop.** The tail
+  survives view rebuilds only because `setOrg` stops it before discarding the
+  view. Relying on "the message won't be routed anywhere" is an invariant that
+  a future routing change would quietly break.
+- **Polling loops must stop on error.** The first version retried a failing
+  describe forever; one unreachable org would have hammered it. Errors now
+  suppress retries and surface once.
+- **Timers make synchronous test drivers hang.** Each new `tea.Tick` source
+  (status clear, spinner, cursor blink, tail) has to be excluded from the test
+  pump — worth centralizing if a fifth appears.

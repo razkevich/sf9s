@@ -60,7 +60,7 @@ schema is still downloading is answered when it arrives.
 | **limits** | org limits sorted by usage, with thresholds that go amber at 75% and red at 90% |
 | **meta** | metadata inventory: 200+ types → components with *last modified by/at* — "who touched this layout?" in three keystrokes |
 | **deploys** | recent metadata deployments with component/test counts and error details |
-| **logs** | Apex debug logs: browse, open, search inside a log (`/`, `n/N`), delete |
+| **logs** | Apex debug logs: browse, open, search inside a log (`/`, `n/N`), **tail** new logs live (`t`), delete |
 
 Navigate anywhere with the `:` command palette (like k9s), `?` shows every
 key, `/` filters any table, `esc` always goes back, `ctrl+c` always quits.
@@ -75,7 +75,8 @@ h j k l      move rows / pan columns  g G     top / bottom
 tab          complete at cursor       ctrl+r  run query
 ```
 
-Run `sf9s -o my-alias` to land directly on a specific org.
+Run `sf9s -o my-alias` to land directly on a specific org, and `sf9s -h` for
+the full introduction.
 
 ## Saved queries
 
@@ -132,7 +133,7 @@ masking.
 
 ## Roadmap
 
-- Live Apex log tail; anonymous Apex execution
+- Anonymous Apex execution
 - Record editing / DML behind explicit safeguards
 - Bulk API job monitor; SOSL search
 - Homebrew tap, Bubble Tea v2 migration

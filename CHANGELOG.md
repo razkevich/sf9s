@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **Live Apex log tail**: `t` on the logs view watches for new debug logs and
+  prepends them as they arrive; stops on `t`, on leaving the view, on org
+  switch, or on error
+- `sf9s -h` now introduces the tool, both flags, the config/cache locations and
+  the `sf` CLI prerequisite
+- `y` in the record inspector copies the record as JSON
 - **SOQL autocomplete**: `tab` / `ctrl+space` completes objects after `FROM`,
   fields in `SELECT` / `WHERE` / `ORDER BY`, and relationship paths, driven by
   the org's own schema via the describe cache
