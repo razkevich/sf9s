@@ -208,7 +208,7 @@ func (v *logsView) bodyKey(msg tea.KeyMsg) tea.Cmd {
 			v.searchTerm = ""
 		case tea.KeyEnter:
 			v.searching = false
-			v.runSearch()
+			return v.runSearch()
 		case tea.KeyBackspace:
 			if r := []rune(v.searchTerm); len(r) > 0 {
 				v.searchTerm = string(r[:len(r)-1])
@@ -236,11 +236,11 @@ func (v *logsView) bodyKey(msg tea.KeyMsg) tea.Cmd {
 	return cmd
 }
 
-func (v *logsView) runSearch() {
+func (v *logsView) runSearch() tea.Cmd {
 	v.matches = v.matches[:0]
 	needle := strings.ToLower(v.searchTerm)
 	if needle == "" {
-		return
+		return nil
 	}
 	for i, line := range v.bodyLines {
 		if strings.Contains(strings.ToLower(line), needle) {
@@ -248,9 +248,7 @@ func (v *logsView) runSearch() {
 		}
 	}
 	v.matchIdx = -1
-	if len(v.matches) > 0 {
-		v.jumpMatch(1)
-	}
+	return v.jumpMatch(1)
 }
 
 func (v *logsView) jumpMatch(dir int) tea.Cmd {
