@@ -38,12 +38,24 @@ go install github.com/razkevich/sf9s/cmd/sf9s@latest
 Requires the [Salesforce CLI](https://developer.salesforce.com/tools/salesforcecli)
 on your PATH with at least one authenticated org (`sf org login web`).
 
+## Autocomplete
+
+Press `tab` (or `ctrl+space`) and sf9s completes from your org's real schema:
+objects after `FROM`, fields inside `SELECT` / `WHERE` / `ORDER BY`, and
+relationship paths — `Owner.` then `tab` again lists the target object's
+fields. Unambiguous prefixes insert directly; ambiguous ones show a picker
+with each candidate's type. Suggestions come from the describe cache, so they
+are instant once an object has been touched, and a request made while the
+schema is still downloading is answered when it arrives.
+
+<img src="docs/img/complete.png" alt="sf9s SOQL autocomplete" width="850">
+
 ## Views
 
 | view | what you get |
 |---|---|
 | **orgs** | every authenticated org: type, status, scratch expiry, defaults. `o` opens it in the browser (logged in via frontdoor), `y` copies an access token, `Y` the instance URL |
-| **query** | multi-line SOQL editor with history (`ctrl+p/n`), saved-query library (`ctrl+s`), Tooling API toggle (`ctrl+t`), pagination (`m`), row inspector (`enter`), CSV/JSON export (`e`/`E`) |
+| **query** | multi-line SOQL editor with **autocomplete** (`tab`), history (`ctrl+p/n`), saved-query library (`ctrl+s`), Tooling API toggle (`ctrl+t`), pagination (`m`), row inspector (`enter`), copy cell/row (`y`/`Y`), CSV/JSON export (`e`/`E`) |
 | **schema** | fuzzy-searchable objects → fields with types, reference targets, picklist values; `c` builds a SELECT for the query view, `y` copies API names |
 | **limits** | org limits sorted by usage, with thresholds that go amber at 75% and red at 90% |
 | **meta** | metadata inventory: 200+ types → components with *last modified by/at* — "who touched this layout?" in three keystrokes |
@@ -56,10 +68,11 @@ key, `/` filters any table, `esc` always goes back, `ctrl+c` always quits.
 ## Keys (the short version)
 
 ```
-:            command palette          /     filter any table
-?            help                     esc   back / close
-enter        select / inspect         q     back (quit on orgs view)
-h j k l      move rows / pan columns  g G   top / bottom
+:            command palette          /       filter any table
+?            help                     esc     back / close
+enter        select / inspect         q       back (quit on orgs view)
+h j k l      move rows / pan columns  g G     top / bottom
+tab          complete at cursor       ctrl+r  run query
 ```
 
 Run `sf9s -o my-alias` to land directly on a specific org.
@@ -98,19 +111,30 @@ Architecture, requirements and testing strategy live in [docs/](docs/).
 
 ## Testing
 
-Three layers, all in CI: unit tests per package, message-loop tests for every
-view, and an end-to-end suite that boots the **real TUI** (via
+Four layers. Unit tests per package; message-loop tests for every view; an
+end-to-end suite that boots the **real TUI** (via
 [teatest](https://github.com/charmbracelet/x)) against a fake `sf` binary and
-an in-process mock org, then asserts on the rendered terminal frames — the
-same journeys a user takes, from org discovery to CSV export.
+an in-process mock org, asserting on rendered terminal frames; and an
+integration tier that runs the same journeys against a live
+[sf-localstack](https://github.com/razkevich/sf-localstack) — a real Salesforce
+API emulator — so wrong assumptions about the API surface there instead of in
+front of a user.
+
+```bash
+go test ./...                                  # everything hermetic, no org needed
+docker run -p 8080:8080 razkevich/sf-localstack
+go test -tags localstack ./e2e/                # against the emulator
+```
+
+That last tier paid for itself immediately: it caught keystrokes being dropped
+when you typed straight after selecting an org — a bug our own mock had been
+masking.
 
 ## Roadmap
 
 - Live Apex log tail; anonymous Apex execution
 - Record editing / DML behind explicit safeguards
 - Bulk API job monitor; SOSL search
-- [sf-localstack](https://github.com/razkevich/sf-localstack) powered
-  integration environment
 - Homebrew tap, Bubble Tea v2 migration
 
 ## License
