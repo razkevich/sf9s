@@ -446,3 +446,41 @@ func TestHelpListsKeysTheViewActuallyHas(t *testing.T) {
 		}
 	}
 }
+
+func TestCommandModeSwitchesOrgByName(t *testing.T) {
+	m := multiOrgModel(t)
+	// Numbered hotkeys only reach the first nine; :org reaches any of them.
+	drive(t, m, key(":"))
+	for _, r := range "org staging" {
+		drive(t, m, key(string(r)))
+	}
+	if !strings.Contains(m.View(), "switch to org") {
+		t.Fatalf("command mode should preview the org switch:\n%s", m.View())
+	}
+	drive(t, m, key("enter"))
+	if m.current.Alias != "staging" {
+		t.Fatalf(":org staging selected %q", m.current.Alias)
+	}
+}
+
+func TestCommandModeOrgMatchingIsHelpful(t *testing.T) {
+	m := multiOrgModel(t)
+
+	drive(t, m, switchOrgMsg{title: "nope"})
+	if !strings.Contains(m.View(), "no org matching nope") {
+		t.Errorf("an unknown org should say so:\n%s", m.View())
+	}
+
+	// A partial that matches several must not guess.
+	drive(t, m, switchOrgMsg{title: "a"})
+	view := m.View()
+	if !strings.Contains(view, "matches") {
+		t.Errorf("an ambiguous name should list the candidates:\n%s", view)
+	}
+
+	// A partial that matches one is enough.
+	drive(t, m, switchOrgMsg{title: "stag"})
+	if m.current.Alias != "staging" {
+		t.Errorf("unambiguous partial should select it, got %q", m.current.Alias)
+	}
+}

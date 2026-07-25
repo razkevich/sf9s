@@ -49,10 +49,11 @@ func TestMain(m *testing.M) {
 }
 
 type harness struct {
-	tm      *teatest.TestModel
-	org     *mockorg.Server
-	copied  *[]string
-	confDir string
+	tm        *teatest.TestModel
+	org       *mockorg.Server
+	copied    *[]string
+	confDir   string
+	exportDir string
 }
 
 func start(t *testing.T) *harness {
@@ -71,6 +72,8 @@ func startWith(t *testing.T) *harness {
 	t.Helper()
 	t.Chdir(t.TempDir())
 
+	exportDir := t.TempDir()
+	t.Setenv("SF9S_EXPORT_DIR", exportDir)
 	confDir := t.TempDir()
 	store := config.NewStore(config.Paths{
 		ConfigDir: filepath.Join(confDir, "config"),
@@ -95,7 +98,7 @@ func startWith(t *testing.T) *harness {
 		Version:   "e2e",
 	}
 	tm := teatest.NewTestModel(t, ui.New(deps), teatest.WithInitialTermSize(140, 40))
-	return &harness{tm: tm, copied: &copied, confDir: confDir}
+	return &harness{tm: tm, copied: &copied, confDir: confDir, exportDir: exportDir}
 }
 
 // waitFor blocks until every substring has been seen in the output stream
@@ -154,10 +157,11 @@ func TestJourneyOrgsQueryExport(t *testing.T) {
 	h.waitFor(t, "AnnualRevenue", "12000000")
 	h.key(tea.KeyEsc)
 
-	// Export CSV lands in the working directory with flattened headers.
+	// Export lands in the configured export directory, with flattened
+	// headers, and the path stays on screen rather than only in a toast.
 	h.typeString("e")
-	h.waitFor(t, "exported ")
-	entries, err := filepath.Glob("sf9s-export-*.csv")
+	h.waitFor(t, "exported ", "saved → ")
+	entries, err := filepath.Glob(filepath.Join(h.exportDir, "sf9s-export-*.csv"))
 	if err != nil || len(entries) != 1 {
 		t.Fatalf("expected one export file, got %v (%v)", entries, err)
 	}

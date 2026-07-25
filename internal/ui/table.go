@@ -490,6 +490,14 @@ func (t *dataTable) footer(lastCol int) string {
 	return styleDim.Render(runewidth.Truncate(seg, t.width, "…"))
 }
 
+// plural renders "1 thing" / "2 things".
+func plural(n int, noun string) string {
+	if n == 1 {
+		return fmt.Sprintf("%d %s", n, noun)
+	}
+	return fmt.Sprintf("%d %ss", n, noun)
+}
+
 func clampInt(v, lo, hi int) int {
 	return max(lo, min(v, hi))
 }

@@ -247,13 +247,29 @@ func (m *Model) setOrg(org sfcli.Org) {
 	if qv, ok := m.views[ViewQuery].(*queryView); ok {
 		qv.resetOrg()
 	}
-	m.pendingOrgInfo = m.loadOrgInfo(o)
+	m.pendingOrgInfo = tea.Batch(m.warmToken(), m.loadOrgInfo(o))
 	if ov, ok := m.views[ViewOrgs].(*orgsView); ok {
 		ov.setOrgs(m.orgs) // move the ● to the org we just switched to
 	}
 }
 
 const orgInfoTTL = 24 * time.Hour
+
+// warmToken resolves credentials in the background as soon as an org is
+// selected. Resolution shells out to the sf CLI and costs seconds; without
+// this it is paid by — and blamed on — the user's first query.
+func (m *Model) warmToken() tea.Cmd {
+	client := m.client
+	if client == nil {
+		return nil
+	}
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		defer cancel()
+		_ = client.Warm(ctx)
+		return nil
+	}
+}
 
 // loadOrgInfo asks the org what it is, from cache when possible. Returns nil
 // when the answer is already known.
@@ -474,6 +490,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case switchOrgMsg:
+		return m, m.switchOrgByName(msg.title)
+
 	case switchViewMsg:
 		return m, m.navigate(msg.id)
 
@@ -500,6 +519,42 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 	return m, tea.Batch(cmds...)
+}
+
+// switchOrgByName selects an org by alias or username, matching loosely so
+// `:org qa` finds `qa5` when there is only one candidate.
+func (m *Model) switchOrgByName(name string) tea.Cmd {
+	lower := strings.ToLower(strings.TrimSpace(name))
+	var exact, partial []sfcli.Org
+	for _, o := range m.orgs {
+		switch {
+		case strings.EqualFold(o.Alias, lower) || strings.EqualFold(o.Username, lower):
+			exact = append(exact, o)
+		case strings.Contains(strings.ToLower(o.Title()), lower) ||
+			strings.Contains(strings.ToLower(o.Username), lower):
+			partial = append(partial, o)
+		}
+	}
+	candidates := exact
+	if len(candidates) == 0 {
+		candidates = partial
+	}
+	switch len(candidates) {
+	case 0:
+		return toast(statusWarn, "no org matching "+name)
+	case 1:
+		if m.current != nil && m.current.Username == candidates[0].Username {
+			return toast(statusInfo, "already on "+candidates[0].Title())
+		}
+		m.setOrg(candidates[0])
+		return tea.Batch(toast(statusOK, "switched to "+candidates[0].Title()), m.takePendingOrgInfo())
+	default:
+		names := make([]string, 0, len(candidates))
+		for _, o := range candidates {
+			names = append(names, o.Title())
+		}
+		return toast(statusWarn, name+" matches "+strings.Join(names, ", "))
+	}
 }
 
 // switchOrgByHotkey selects the org behind a number key, mirroring how k9s

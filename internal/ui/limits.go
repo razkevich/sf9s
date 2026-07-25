@@ -14,12 +14,14 @@ import (
 )
 
 type limitsView struct {
-	app     *Model
-	vp      viewport.Model
-	limits  map[string]api.Limit
-	loading bool
-	gen     int
-	ready   bool
+	app       *Model
+	vp        viewport.Model
+	limits    map[string]api.Limit
+	fetchedAt time.Time
+	stale     bool
+	loading   bool
+	gen       int
+	ready     bool
 }
 
 func newLimitsView(app *Model) *limitsView {
@@ -61,8 +63,13 @@ func (v *limitsView) Update(msg tea.Msg) tea.Cmd {
 		}
 		v.loading = false
 		if msg.err != nil {
+			// The numbers on screen are now of unknown age; say so rather
+			// than let a glance mistake them for current.
+			v.stale = v.limits != nil
 			return toastErr(msg.err)
 		}
+		v.stale = false
+		v.fetchedAt = time.Now()
 		v.limits = msg.limits
 		v.renderContent()
 		return nil
@@ -144,9 +151,13 @@ func usageBar(pct float64, width int) string {
 
 func (v *limitsView) View(width, height int) string {
 	head := styleTitle.Render("Org limits")
-	if v.loading {
+	switch {
+	case v.loading:
 		head += "  " + v.app.spin.View() + styleDim.Render(" fetching…")
-	} else {
+	case v.stale:
+		head += "  " + styleWarn.Render("stale — refresh failed, showing "+
+			v.fetchedAt.Format("15:04:05"))
+	default:
 		head += styleDim.Render(fmt.Sprintf("  %d tracked (sorted by usage)", len(v.limits)))
 	}
 	v.vp.Width = width

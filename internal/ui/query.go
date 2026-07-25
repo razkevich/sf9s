@@ -49,6 +49,10 @@ type queryView struct {
 
 	card *detailCard
 
+	// exported is the path of the last export, kept on screen because a
+	// four-second toast is not enough to find a file by.
+	exported string
+
 	// lastErr is the failure of the most recent run, shown until the next
 	// successful one so it cannot be mistaken for an empty result.
 	lastErr error
@@ -176,6 +180,7 @@ func (v *queryView) runQuery() tea.Cmd {
 	gen := v.gen
 	v.running = true
 	v.lastErr = nil
+	v.exported = ""
 	client := v.app.client
 	tooling := v.tooling
 	store := v.app.deps.Store
@@ -258,6 +263,12 @@ func (v *queryView) Update(msg tea.Msg) tea.Cmd {
 		// Focus stays in the editor: silently moving it to the table turns a
 		// half-typed next query into a stream of single-key commands.
 		return toast(statusOK, fmt.Sprintf("%d/%d rows in %s", v.fetched, msg.res.TotalSize, msg.elapsed.Round(time.Millisecond)))
+
+	case exportedMsg:
+		// A toast fades in seconds and people miss where the file went, so
+		// keep the path on screen until the next run.
+		v.exported = msg.path
+		return toast(statusOK, "exported "+msg.path)
 
 	case tea.KeyMsg:
 		return v.handleKey(msg)
@@ -701,6 +712,9 @@ func collapse(q string) string {
 	return strings.Join(strings.Fields(q), " ")
 }
 
+// exportedMsg reports where an export landed.
+type exportedMsg struct{ path string }
+
 // oneLine flattens a message for single-line display. Salesforce error bodies
 // are frequently multi-line, and extra lines push the app's own chrome off
 // the screen.
@@ -725,11 +739,8 @@ func (v *queryView) export(format string) tea.Cmd {
 	if v.result == nil || len(v.allRows) == 0 {
 		return toast(statusWarn, "nothing to export")
 	}
-	cwd, err := os.Getwd()
-	if err != nil {
-		return toastErr(err)
-	}
-	name := filepath.Join(cwd, fmt.Sprintf("sf9s-export-%s.%s", time.Now().Format("20060102-150405"), format))
+	dir := v.app.deps.Store.ExportDir()
+	name := filepath.Join(dir, fmt.Sprintf("sf9s-export-%s.%s", time.Now().Format("20060102-150405"), format))
 	cols := v.result.Columns
 	rows := make([][]string, len(v.allRows))
 	for i, row := range v.allRows {
@@ -790,7 +801,7 @@ func (v *queryView) export(format string) tea.Cmd {
 		if err := f.Close(); err != nil {
 			return statusMsg{kind: statusError, text: err.Error()}
 		}
-		return statusMsg{kind: statusOK, text: "exported " + name}
+		return exportedMsg{path: name}
 	}
 }
 
@@ -816,7 +827,9 @@ func (v *queryView) View(width, height int) string {
 	}
 
 	resultHead := ""
-	if v.lastErr != nil {
+	if v.exported != "" {
+		resultHead = styleOK.Render("saved → " + runewidth.Truncate(v.exported, max(width-10, 20), "…"))
+	} else if v.lastErr != nil {
 		resultHead = styleErrText.Render("✖ " + runewidth.Truncate(oneLine(v.lastErr.Error()), max(width-4, 20), "…"))
 	} else if v.result != nil {
 		resultHead = styleDim.Render(fmt.Sprintf("%d/%d rows • %s", v.fetched, v.result.TotalSize, v.elapsed.Round(time.Millisecond)))

@@ -54,6 +54,9 @@ type orgInfoMsg struct {
 	err   error
 }
 
+// switchOrgMsg asks the root to switch org by alias or username.
+type switchOrgMsg struct{ title string }
+
 // switchViewMsg asks the root to activate a view.
 type switchViewMsg struct{ id ViewID }
 

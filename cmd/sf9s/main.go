@@ -11,6 +11,8 @@ import (
 
 	"github.com/atotto/clipboard"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+	"github.com/muesli/termenv"
 	"github.com/pkg/browser"
 
 	"github.com/razkevich/sf9s/internal/api"
@@ -103,6 +105,11 @@ func main() {
 		OpenURL:    browser.OpenURL,
 		Version:    version,
 		InitialOrg: *org,
+	}
+
+	// A dumb terminal cannot render styling; lipgloss only checks NO_COLOR.
+	if t := os.Getenv("TERM"); t == "" || t == "dumb" {
+		lipgloss.SetColorProfile(termenv.Ascii)
 	}
 
 	p := tea.NewProgram(ui.New(deps), tea.WithAltScreen())

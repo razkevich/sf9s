@@ -42,6 +42,10 @@ func (i paletteItem) aliasLabel() string {
 	return strings.Join(i.aliases, ", ")
 }
 
+// orgPrefix switches org from command mode: `:org qa5`. Numbered hotkeys only
+// reach the first nine, and the org you use most is not always in that set.
+const orgPrefix = "org "
+
 // palette is the k9s-style `:` command jumper.
 type palette struct {
 	open    bool
@@ -61,7 +65,7 @@ func newPalette() *palette {
 	return &palette{
 		input: ti,
 		items: []paletteItem{
-			{name: "orgs", aliases: []string{"org", "o"}, desc: "authenticated orgs (home)", id: ViewOrgs},
+			{name: "orgs", aliases: []string{"o"}, desc: "authenticated orgs (home) — :org <alias> switches", id: ViewOrgs},
 			{name: "query", aliases: []string{"soql", "sql"}, desc: "SOQL query editor", id: ViewQuery},
 			{name: "schema", aliases: []string{"sobjects", "sc"}, desc: "object & field browser", id: ViewSchema},
 			{name: "limits", aliases: []string{"lim"}, desc: "org limits & usage", id: ViewLimits},
@@ -86,6 +90,16 @@ func (p *palette) Open() {
 func (p *palette) OpenAliases() {
 	p.Open()
 	p.listing = true
+}
+
+// orgArgument reads `:org <alias>` and returns the requested org.
+func (p *palette) orgArgument() (string, bool) {
+	value := strings.TrimSpace(p.input.Value())
+	if !strings.HasPrefix(strings.ToLower(value), orgPrefix) {
+		return "", false
+	}
+	target := strings.TrimSpace(value[len(orgPrefix):])
+	return target, target != ""
 }
 
 // selectedItem is the entry Enter would act on.
@@ -122,6 +136,10 @@ func (p *palette) Update(msg tea.KeyMsg) tea.Cmd {
 		p.open = false
 		return nil
 	case "enter":
+		if target, ok := p.orgArgument(); ok {
+			p.open = false
+			return func() tea.Msg { return switchOrgMsg{title: target} }
+		}
 		if len(p.matches) == 0 {
 			p.open = false
 			return nil
@@ -156,6 +174,11 @@ func (p *palette) View(width, height int) string {
 	}
 	b.WriteString(p.input.View())
 	b.WriteString("\n\n")
+	if target, ok := p.orgArgument(); ok {
+		b.WriteString(styleHotkey.Render("▸ switch to org ") + styleTitle.Render(target) + "\n")
+		return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center,
+			styleOverlay.Width(min(72, width-4)).Render(b.String()))
+	}
 	for i, idx := range p.matches {
 		item := p.items[idx]
 		row := padRight(item.name, 9) + padRight(item.aliasLabel(), 18) + item.desc

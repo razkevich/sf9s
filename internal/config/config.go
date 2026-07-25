@@ -7,8 +7,10 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -61,6 +63,25 @@ queries:
     query: SELECT UserId, User.Name, LoginTime, Status, SourceIp, Application FROM LoginHistory WHERE Status != 'Success' AND LoginTime = LAST_N_DAYS:7 ORDER BY LoginTime DESC LIMIT 100
 `
 
+// ExportDir is where result exports are written. Writing to the working
+// directory drops files into whatever repository you happened to launch from,
+// so prefer ~/Downloads when it exists.
+func (s *Store) ExportDir() string {
+	if dir := os.Getenv("SF9S_EXPORT_DIR"); dir != "" {
+		return dir
+	}
+	if home, err := os.UserHomeDir(); err == nil {
+		downloads := filepath.Join(home, "Downloads")
+		if info, err := os.Stat(downloads); err == nil && info.IsDir() {
+			return downloads
+		}
+	}
+	if cwd, err := os.Getwd(); err == nil {
+		return cwd
+	}
+	return "."
+}
+
 // Store is the entry point for all persisted state. History writes are
 // serialized and atomic: concurrent queries must never corrupt or truncate
 // the user's history file.
@@ -94,9 +115,20 @@ func (s *Store) SavedQueries() ([]SavedQuery, error) {
 		Queries []SavedQuery `yaml:"queries"`
 	}
 	if err := yaml.Unmarshal(raw, &doc); err != nil {
-		return nil, err
+		// The Go type names in a yaml error mean nothing to the person who
+		// has to fix the file; the path does.
+		return nil, fmt.Errorf("%s is not valid YAML: %s", s.queriesPath(), firstLine(err.Error()))
 	}
 	return doc.Queries, nil
+}
+
+// firstLine keeps an error to one line: the status bar is one line, and a
+// multi-line message pushes the app's own chrome off the screen.
+func firstLine(s string) string {
+	if i := strings.IndexByte(s, '\n'); i >= 0 {
+		return strings.TrimSpace(s[:i])
+	}
+	return strings.TrimSpace(s)
 }
 
 const historyCap = 500

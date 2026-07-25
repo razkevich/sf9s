@@ -182,6 +182,13 @@ func decodeAPIError(resp *http.Response) error {
 	return apiErr
 }
 
+// Warm resolves credentials without making a request, so the cost of
+// shelling out to the sf CLI is not charged to the user's next action.
+func (c *Client) Warm(ctx context.Context) error {
+	_, err := c.tokens.Credentials(ctx, false)
+	return err
+}
+
 // Query runs a SOQL query against the data or tooling endpoint.
 func (c *Client) Query(ctx context.Context, soql string, tooling bool) (*Result, error) {
 	endpoint := "query"
@@ -269,10 +276,19 @@ type Limit struct {
 	Remaining int64 `json:"Remaining"`
 }
 
+// Limits reads the org's limits. Entries are decoded one at a time so a
+// single unexpected shape costs that one limit rather than the whole view.
 func (c *Client) Limits(ctx context.Context) (map[string]Limit, error) {
-	var limits map[string]Limit
-	if err := c.get(ctx, "limits", &limits); err != nil {
+	var raw map[string]json.RawMessage
+	if err := c.get(ctx, "limits", &raw); err != nil {
 		return nil, err
+	}
+	limits := make(map[string]Limit, len(raw))
+	for name, entry := range raw {
+		var l Limit
+		if json.Unmarshal(entry, &l) == nil {
+			limits[name] = l
+		}
 	}
 	return limits, nil
 }

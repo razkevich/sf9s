@@ -62,6 +62,9 @@ schema is still downloading is answered when it arrives.
 | **deploys** | recent metadata deployments with component/test counts and error details |
 | **logs** | Apex debug logs: browse, open, search inside a log (`/`, `n/N`), **tail** new logs live (`t`), delete |
 
+Every table filters with `/` and sorts with `s`. Exports land in `~/Downloads`
+(override with `SF9S_EXPORT_DIR`).
+
 <img src="docs/img/orgs.png" alt="sf9s orgs view" width="850">
 
 ## Navigation (k9s conventions)
@@ -74,9 +77,10 @@ numbered hotkeys — the same place k9s puts numbered namespaces.
 :query  :schema  :limits  :meta  :deploys  :logs  :orgs      command mode
 :sc  :lim  :md  :dep  :sql  :apex                            aliases (ctrl+a lists them all)
 :q                                                           quit
-1 … 9                                                        switch org
+:org <alias>                                                 switch to any org
+1 … 9                                                        switch org (orgs view)
 esc                                                          bail out one level
-?                                                            keys for this view
+? (f1 while typing)                                          keys for this view
 /                                                            filter any table
 h j k l   g G   pgup/pgdn                                    move, jump, page
 ```
@@ -90,8 +94,10 @@ the full introduction.
 
 ## Saved queries
 
-First run creates `~/.config/sf9s/queries.yaml` (platform-appropriate
-location) with useful starters. Add your own:
+The first time you open the picker (`ctrl+s`) sf9s writes a starter library
+you can edit. `sf9s -h` prints the exact path for your machine — it is
+`~/.config/sf9s/queries.yaml` on Linux and
+`~/Library/Application Support/sf9s/queries.yaml` on macOS. Add your own:
 
 ```yaml
 queries:
@@ -106,14 +112,21 @@ They're org-agnostic and appear in the `ctrl+s` picker, run on `enter`.
 
 ## Design notes
 
-- **Zero config, zero credentials stored.** Tokens are resolved through
-  `sf org display` on demand, cached in memory only, and never written to disk.
+- **Zero config, zero credentials stored.** Tokens are resolved through the
+  `sf` CLI on demand (`org display`, falling back to `org auth
+  show-access-token` on CLIs that no longer expose them), cached in memory
+  only, and never written to disk.
   The only file sf9s ever writes into an org is nothing; the only org write at
   all is deleting an Apex log, behind a confirm.
 - **Fast where it counts.** Interactive reads (query/describe/limits) go
   straight to the REST API with a cached token — ~100–300 ms round trips —
   while org inventory and metadata listing delegate to the CLI that already
   owns that logic. Describes are disk-cached for instant schema browsing.
+- **It tells you when you are in production.** The `sf` CLI cannot distinguish
+  a production tenant from a Developer Edition, so sf9s asks the org itself and
+  marks it — a red `PROD` badge, the real edition, and a warning when you
+  switch in. Acting on the wrong org is the costliest mistake this tool can
+  help you avoid.
 - **Honest tables.** Query columns come back in *your* SELECT order (raw JSON
   order-preserving parse), numbers aren't mangled through float64, child
   subqueries summarize as `(n rows)`, nulls render empty.
