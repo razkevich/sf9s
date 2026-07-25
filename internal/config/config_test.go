@@ -168,3 +168,20 @@ func TestCacheRoundTripAndTTL(t *testing.T) {
 		t.Fatal("expired entry should miss")
 	}
 }
+
+func TestCacheZeroTTLNeverServes(t *testing.T) {
+	// Guards a Windows failure: with a coarse clock, a just-written entry can
+	// read as exactly zero old, so "> maxAge" served it.
+	s := tempStore(t)
+	s.CachePut("k", map[string]string{"a": "b"})
+	var got map[string]string
+	if s.CacheGet("k", 0, &got) {
+		t.Error("a zero TTL must never serve a cached entry")
+	}
+	if s.CacheGet("k", -time.Second, &got) {
+		t.Error("a negative TTL must never serve a cached entry")
+	}
+	if !s.CacheGet("k", time.Minute, &got) || got["a"] != "b" {
+		t.Error("a positive TTL should still serve it")
+	}
+}

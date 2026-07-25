@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -288,6 +289,9 @@ func TestAccessTokenAcceptsObjectShape(t *testing.T) {
 // A `sf` whose grandchild outlives it must not hang sf9s: output is captured
 // through pipes, and Run waits for every writer to close them.
 func TestExecRunnerDoesNotHangOnOrphanedGrandchild(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the repro needs a POSIX shell; WaitDelay, which is the fix, is platform-independent")
+	}
 	dir := t.TempDir()
 	script := filepath.Join(dir, "sf")
 	body := "#!/bin/sh\nsleep 60 &\nprintf '%s'\nexit 0\n"

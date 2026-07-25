@@ -212,8 +212,13 @@ func (s *Store) cachePath(key string) string {
 	return filepath.Join(s.paths.CacheDir, hex.EncodeToString(sum[:])+".json")
 }
 
-// CacheGet loads a cached value if it exists and is younger than maxAge.
+// CacheGet loads a cached value if it exists and is younger than maxAge. A
+// maxAge of zero or less means "do not use the cache": on a coarse clock the
+// age of a just-written entry can read as exactly zero.
 func (s *Store) CacheGet(key string, maxAge time.Duration, into any) bool {
+	if maxAge <= 0 {
+		return false
+	}
 	raw, err := os.ReadFile(s.cachePath(key))
 	if err != nil {
 		return false
