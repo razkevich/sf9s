@@ -19,6 +19,14 @@ type Server struct {
 	DeletedLogs []string
 }
 
+func firstWord(q string) string {
+	fields := strings.Fields(q)
+	if len(fields) == 0 {
+		return "<empty>"
+	}
+	return fields[0]
+}
+
 func New() *Server {
 	s := &Server{}
 	mux := http.NewServeMux()
@@ -31,6 +39,14 @@ func New() *Server {
 			return
 		}
 		q := r.URL.Query().Get("q")
+		// Reject statements a real org would reject, so a dropped keystroke
+		// surfaces as a test failure instead of silently "working".
+		if !strings.HasPrefix(strings.ToUpper(strings.TrimSpace(q)), "SELECT ") {
+			w.WriteHeader(http.StatusBadRequest)
+			fmt.Fprintf(w, `[{"message":%q,"errorCode":"MALFORMED_QUERY"}]`,
+				"unexpected token: "+firstWord(q))
+			return
+		}
 		switch {
 		case strings.Contains(q, "FROM Account"):
 			fmt.Fprint(w, `{"totalSize":3,"done":true,"records":[

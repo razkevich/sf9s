@@ -93,8 +93,16 @@ func (v *orgsView) Update(msg tea.Msg) tea.Cmd {
 		}
 		switch msg.String() {
 		case "enter", " ":
+			// Selection is applied synchronously: routing it through a
+			// command would let the next keystrokes reach the old view,
+			// silently swallowing the first characters a user types.
 			if org := v.selected(); org != nil {
-				return func() tea.Msg { return useOrgMsg{org: *org, jump: msg.String() == "enter"} }
+				v.app.setOrg(*org)
+				cmds := []tea.Cmd{toast(statusOK, "using org "+org.Title())}
+				if msg.String() == "enter" {
+					cmds = append(cmds, v.app.navigate(ViewQuery))
+				}
+				return tea.Batch(cmds...)
 			}
 		case "o":
 			return v.openOrg()

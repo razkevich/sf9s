@@ -51,9 +51,3 @@ type switchViewMsg struct{ id ViewID }
 
 // prefillQueryMsg jumps to the query view with a generated SOQL statement.
 type prefillQueryMsg struct{ soql string }
-
-// useOrgMsg sets the current org; jump indicates moving on to the query view.
-type useOrgMsg struct {
-	org  sfcli.Org
-	jump bool
-}

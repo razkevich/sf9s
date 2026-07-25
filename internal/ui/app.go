@@ -279,14 +279,6 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
-	case useOrgMsg:
-		m.setOrg(msg.org)
-		cmds := []tea.Cmd{toast(statusOK, "using org "+msg.org.Title())}
-		if msg.jump {
-			cmds = append(cmds, m.navigate(ViewQuery))
-		}
-		return m, tea.Batch(cmds...)
-
 	case switchViewMsg:
 		return m, m.navigate(msg.id)
 

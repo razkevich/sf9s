@@ -54,6 +54,15 @@ func start(t *testing.T) *harness {
 	org := mockorg.New()
 	t.Cleanup(org.Close)
 	t.Setenv("SF9S_MOCK_URL", org.URL)
+	h := startWith(t, org.URL)
+	h.org = org
+	return h
+}
+
+// startWith boots the TUI against an org at instanceURL, which the fake sf
+// CLI is already configured to report (via SF9S_MOCK_URL).
+func startWith(t *testing.T, instanceURL string) *harness {
+	t.Helper()
 	t.Chdir(t.TempDir())
 
 	confDir := t.TempDir()
@@ -80,7 +89,7 @@ func start(t *testing.T) *harness {
 		Version:   "e2e",
 	}
 	tm := teatest.NewTestModel(t, ui.New(deps), teatest.WithInitialTermSize(140, 40))
-	return &harness{tm: tm, org: org, copied: &copied, confDir: confDir}
+	return &harness{tm: tm, copied: &copied, confDir: confDir}
 }
 
 // waitFor blocks until every substring has been seen in the output stream
@@ -148,6 +157,18 @@ func TestJourneyOrgsQueryExport(t *testing.T) {
 		!strings.Contains(string(raw), "Acme Rockets") {
 		t.Fatalf("export content wrong:\n%s", raw)
 	}
+	h.quit(t)
+}
+
+// Regression: org selection used to round-trip through an async message, so
+// keystrokes sent right after enter reached the orgs view and were dropped.
+func TestJourneyTypingImmediatelyAfterOrgSelect(t *testing.T) {
+	h := start(t)
+	h.waitFor(t, "Authenticated orgs (3)")
+	h.key(tea.KeyEnter)
+	h.typeString("SELECT Id, Name FROM Account")
+	h.key(tea.KeyCtrlR)
+	h.waitFor(t, "SELECT Id, Name FROM Account", "Acme Rockets")
 	h.quit(t)
 }
 
