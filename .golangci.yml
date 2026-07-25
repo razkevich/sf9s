@@ -12,10 +12,20 @@ linters:
     - errorlint
     - copyloopvar
   settings:
+    errcheck:
+      exclude-functions:
+        - (io.Closer).Close
+        - (net/http.ResponseWriter).Write
     revive:
       rules:
         - name: unused-parameter
           disabled: true
+  exclusions:
+    rules:
+      - path: _test\.go
+        linters: [errcheck]
+      - path: e2e/
+        linters: [errcheck]
 
 formatters:
   enable:

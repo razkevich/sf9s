@@ -349,38 +349,42 @@ func (v *queryView) export(format string) tea.Cmd {
 		if err != nil {
 			return statusMsg{kind: statusError, text: err.Error()}
 		}
-		defer f.Close()
-		switch format {
-		case "csv":
-			w := csv.NewWriter(f)
-			if err := w.Write(cols); err != nil {
-				return statusMsg{kind: statusError, text: err.Error()}
-			}
-			for _, row := range rows {
-				if err := w.Write(row); err != nil {
-					return statusMsg{kind: statusError, text: err.Error()}
+		write := func() error {
+			switch format {
+			case "csv":
+				w := csv.NewWriter(f)
+				if err := w.Write(cols); err != nil {
+					return err
 				}
-			}
-			w.Flush()
-			if err := w.Error(); err != nil {
-				return statusMsg{kind: statusError, text: err.Error()}
-			}
-		case "json":
-			out := make([]map[string]string, len(rows))
-			for i, row := range rows {
-				rec := map[string]string{}
-				for j, col := range cols {
-					if j < len(row) {
-						rec[col] = row[j]
+				for _, row := range rows {
+					if err := w.Write(row); err != nil {
+						return err
 					}
 				}
-				out[i] = rec
+				w.Flush()
+				return w.Error()
+			default:
+				out := make([]map[string]string, len(rows))
+				for i, row := range rows {
+					rec := map[string]string{}
+					for j, col := range cols {
+						if j < len(row) {
+							rec[col] = row[j]
+						}
+					}
+					out[i] = rec
+				}
+				enc := json.NewEncoder(f)
+				enc.SetIndent("", "  ")
+				return enc.Encode(out)
 			}
-			enc := json.NewEncoder(f)
-			enc.SetIndent("", "  ")
-			if err := enc.Encode(out); err != nil {
-				return statusMsg{kind: statusError, text: err.Error()}
-			}
+		}
+		if err := write(); err != nil {
+			_ = f.Close()
+			return statusMsg{kind: statusError, text: err.Error()}
+		}
+		if err := f.Close(); err != nil {
+			return statusMsg{kind: statusError, text: err.Error()}
 		}
 		return statusMsg{kind: statusOK, text: "exported " + name}
 	}
