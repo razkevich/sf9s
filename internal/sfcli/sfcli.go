@@ -14,7 +14,6 @@ import (
 	"os/exec"
 	"sort"
 	"strings"
-	"syscall"
 	"time"
 )
 
@@ -72,20 +71,10 @@ func (r ExecRunner) Run(ctx context.Context, args ...string) ([]byte, error) {
 	// Capturing output via pipes means Run() waits for every writer to close
 	// them, so one orphaned grandchild would hang sf9s forever — past any
 	// context deadline, because the deadline kills a process that already
-	// exited. WaitDelay bounds that wait; the process group lets a cancel
-	// take the helpers with it.
+	// exited. WaitDelay bounds that wait; a cancel additionally takes the
+	// helpers with it where the platform allows.
 	cmd.WaitDelay = 2 * time.Second
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	cmd.Cancel = func() error {
-		if cmd.Process == nil {
-			return nil
-		}
-		// Negative pid signals the whole group.
-		if err := syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL); err != nil {
-			return cmd.Process.Kill()
-		}
-		return nil
-	}
+	killProcessGroup(cmd)
 	err := cmd.Run()
 	if err != nil {
 		var execErr *exec.Error

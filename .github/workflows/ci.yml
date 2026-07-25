@@ -20,6 +20,11 @@ jobs:
       - uses: golangci/golangci-lint-action@v8
         with:
           version: latest
+      # Catch platform-specific build breaks on the fast runner, rather than
+      # waiting for the Windows job to fail.
+      - run: GOOS=windows go vet ./...
+      - run: GOOS=linux go vet ./...
+      - run: GOOS=darwin go vet ./...
 
   test:
     strategy:
