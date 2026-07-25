@@ -81,9 +81,28 @@ func Analyze(input string, cursor int) Context {
 	ctx := Context{Prefix: input[start:cursor], Start: start}
 
 	head := input[:start]
+	if insideLiteral(head) {
+		// Typing inside a string literal: nothing here is a field or object.
+		return Context{Prefix: ctx.Prefix, Start: ctx.Start}
+	}
 	ctx.Clause = clauseAt(head)
 	ctx.Object = objectFor(input, start)
 	return ctx
+}
+
+// insideLiteral reports whether the text ends inside an unterminated
+// single-quoted literal.
+func insideLiteral(head string) bool {
+	inLiteral := false
+	for i := 0; i < len(head); i++ {
+		switch {
+		case inLiteral && head[i] == '\\' && i+1 < len(head):
+			i++
+		case head[i] == '\'':
+			inLiteral = !inLiteral
+		}
+	}
+	return inLiteral
 }
 
 // clauseAt determines the clause from the keywords preceding the cursor,
@@ -201,9 +220,30 @@ func keywordsIn(s string) []string {
 }
 
 func tokenize(s string) []string {
-	return strings.FieldsFunc(s, func(r rune) bool {
+	return strings.FieldsFunc(blankLiterals(s), func(r rune) bool {
 		return unicode.IsSpace(r) || r == ',' || r == '(' || r == ')' || r == '\''
 	})
+}
+
+// blankLiterals replaces the contents of single-quoted string literals with
+// spaces, so a keyword inside a literal ("imported from Acme") can never be
+// read as SOQL. An unterminated literal blanks to end of input, which is
+// exactly right: the cursor is inside a string the user is still typing.
+func blankLiterals(s string) string {
+	out := []byte(s)
+	inLiteral := false
+	for i := 0; i < len(out); i++ {
+		switch {
+		case inLiteral && out[i] == '\\' && i+1 < len(out):
+			out[i], out[i+1] = ' ', ' ' // escaped char, e.g. \'
+			i++
+		case out[i] == '\'':
+			inLiteral = !inLiteral
+		case inLiteral:
+			out[i] = ' '
+		}
+	}
+	return string(out)
 }
 
 // trailingObjectComplete reports whether the FROM object has been typed and

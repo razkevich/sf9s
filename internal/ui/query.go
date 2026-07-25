@@ -241,24 +241,33 @@ func (v *queryView) Update(msg tea.Msg) tea.Cmd {
 	return nil
 }
 
-// cursorOffset converts the textarea's line/column cursor into a byte offset
-// in the full editor text.
+// cursorOffset converts the textarea's caret into a byte offset in the full
+// editor text. LineInfo is relative to the *visual* (soft-wrapped) row and
+// CharOffset counts display width, so the logical rune column is
+// StartColumn + ColumnOffset — using CharOffset directly breaks on wrapped
+// lines and on double-width runes.
 func (v *queryView) cursorOffset() int {
 	text := v.editor.Value()
 	lines := strings.Split(text, "\n")
-	row := min(v.editor.Line(), len(lines)-1)
+	row := clampInt(v.editor.Line(), 0, len(lines)-1)
 	offset := 0
 	for i := 0; i < row; i++ {
 		offset += len(lines[i]) + 1
 	}
-	col := v.editor.LineInfo().CharOffset
-	line := lines[row]
-	if runes := []rune(line); col <= len(runes) {
-		offset += len(string(runes[:col]))
-	} else {
-		offset += len(line)
-	}
+	li := v.editor.LineInfo()
+	runes := []rune(lines[row])
+	col := clampInt(li.StartColumn+li.ColumnOffset, 0, len(runes))
+	offset += len(string(runes[:col]))
 	return min(offset, len(text))
+}
+
+// rowColFor maps a byte offset to a logical row and rune column.
+func rowColFor(text string, offset int) (int, int) {
+	offset = clampInt(offset, 0, len(text))
+	before := text[:offset]
+	row := strings.Count(before, "\n")
+	lineStart := strings.LastIndexByte(before, '\n') + 1
+	return row, len([]rune(before[lineStart:]))
 }
 
 // wordBeforeCursor reports whether the character left of the cursor is part
@@ -349,19 +358,19 @@ func (v *queryView) acceptCompletion() tea.Cmd {
 }
 
 // setEditorTextWithCursor replaces the buffer and places the caret at a byte
-// offset, which the textarea only exposes via line/column moves.
+// offset. The textarea exposes no row setter, and SetValue leaves the caret on
+// the last row, so walk to the target row (CursorUp/Down step through visual
+// rows, hence the loop on Line()) and then set the logical column directly.
 func (v *queryView) setEditorTextWithCursor(text string, offset int) {
 	v.editor.SetValue(text)
-	before := text[:min(offset, len(text))]
-	lines := strings.Split(before, "\n")
-	v.editor.CursorStart()
-	for i := 0; i < len(lines)-1; i++ {
+	row, col := rowColFor(text, offset)
+	for guard := 0; v.editor.Line() > row && guard <= len(text); guard++ {
+		v.editor.CursorUp()
+	}
+	for guard := 0; v.editor.Line() < row && guard <= len(text); guard++ {
 		v.editor.CursorDown()
 	}
-	v.editor.CursorStart()
-	for range []rune(lines[len(lines)-1]) {
-		v.editor.SetCursor(v.editor.LineInfo().CharOffset + 1)
-	}
+	v.editor.SetCursor(col)
 }
 
 func (v *queryView) handleKey(msg tea.KeyMsg) tea.Cmd {
@@ -406,6 +415,7 @@ func (v *queryView) handleKey(msg tea.KeyMsg) tea.Cmd {
 	case "ctrl+space", "ctrl+@":
 		if !v.focusResults {
 			v.pendingComplete = false
+			v.comp.clearError()
 			return v.openPopup(true)
 		}
 	case "ctrl+r":
@@ -425,6 +435,7 @@ func (v *queryView) handleKey(msg tea.KeyMsg) tea.Cmd {
 		// shell-style — and otherwise switches panes.
 		if !v.focusResults && v.wordBeforeCursor() {
 			v.pendingComplete = false
+			v.comp.clearError()
 			return v.openPopup(true)
 		}
 		v.focusResults = !v.focusResults

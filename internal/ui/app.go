@@ -74,6 +74,10 @@ type Model struct {
 	orgsErr          error
 	loadingOrgs      bool
 	awaitingStatuses bool
+	// orgsFromCache marks rows restored from disk: they may name orgs that
+	// have since been logged out, so they inform the view but never drive
+	// org selection, and live data replaces rather than merges with them.
+	orgsFromCache bool
 
 	current *sfcli.Org
 	client  *api.Client
@@ -214,6 +218,8 @@ func (m *Model) navigate(id ViewID) tea.Cmd {
 	if id != ViewOrgs && m.current == nil {
 		return toast(statusWarn, "select an org first (enter on the orgs view)")
 	}
+	// Leaving the logs view ends any tail; otherwise it keeps polling the org
+	// from a screen the user can no longer see.
 	if lv, ok := m.views[ViewLogs].(*logsView); ok && id != ViewLogs {
 		lv.stopTail()
 	}
@@ -258,9 +264,18 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.loadingOrgs = false
 		m.orgsErr = nil
 		m.awaitingStatuses = msg.partial
-		if msg.partial {
+		switch {
+		case msg.partial:
 			m.orgs = msg.orgs
-		} else {
+			m.orgsFromCache = msg.cached
+		case m.orgsFromCache:
+			// The live status pass supersedes cached rows entirely, so an org
+			// that was logged out since last run disappears instead of being
+			// resurrected as "Unknown".
+			m.orgs = msg.orgs
+			m.orgsFromCache = false
+			m.deps.Store.CachePut(orgCacheKey, m.orgs)
+		default:
 			m.orgs = mergeOrgStatuses(m.orgs, msg.orgs)
 			m.deps.Store.CachePut(orgCacheKey, m.orgs)
 		}
@@ -269,7 +284,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.currentView()
 		}
-		if m.current == nil {
+		if m.current == nil && !msg.cached {
 			return m, m.autoSelectOrg()
 		}
 		return m, nil
@@ -292,8 +307,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case goBackMsg:
 		if m.active != ViewOrgs {
-			m.active = ViewOrgs
-			m.currentView()
+			return m, m.navigate(ViewOrgs)
 		}
 		return m, nil
 

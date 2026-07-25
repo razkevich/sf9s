@@ -63,6 +63,10 @@ func (c *completer) warm() tea.Cmd {
 // request made too early can be retried instead of reported as "no match".
 func (c *completer) loading() bool { return len(c.inflight) > 0 }
 
+// clearError lets an explicit user request retry after an earlier failure;
+// the guard exists to stop retry storms, not to disable completion forever.
+func (c *completer) clearError() { c.lastErr = nil }
+
 // reset drops schema learned for a previous org, including any error that
 // was blocking retries.
 func (c *completer) reset() {

@@ -61,6 +61,30 @@ func TestAnalyze(t *testing.T) {
 	}
 }
 
+func TestAnalyzeIgnoresStringLiterals(t *testing.T) {
+	// A keyword inside a literal must not steer the clause, and the cursor
+	// inside a literal must offer nothing at all.
+	input, cursor := at("SELECT Id FROM Account WHERE Name = 'imported from Ac|")
+	got := Analyze(input, cursor)
+	if got.Clause != ClauseUnknown {
+		t.Errorf("cursor inside a literal should offer nothing, got clause %v object %q", got.Clause, got.Object)
+	}
+
+	// After a closed literal, analysis resumes normally.
+	input, cursor = at("SELECT Id FROM Account WHERE Name = 'from Acme' AND Ind|")
+	got = Analyze(input, cursor)
+	if got.Clause != ClauseFilter || got.Object != "Account" {
+		t.Errorf("after a closed literal: clause=%v object=%q, want filter/Account", got.Clause, got.Object)
+	}
+
+	// An escaped quote inside a literal must not end it early.
+	input, cursor = at(`SELECT Id FROM Account WHERE Name = 'O\'Brien from X' AND Ind|`)
+	got = Analyze(input, cursor)
+	if got.Clause != ClauseFilter || got.Object != "Account" {
+		t.Errorf("escaped quote: clause=%v object=%q, want filter/Account", got.Clause, got.Object)
+	}
+}
+
 func TestAnalyzeSubquerySelectsChildObject(t *testing.T) {
 	input, cursor := at("SELECT Id, (SELECT La| FROM Contacts) FROM Account")
 	got := Analyze(input, cursor)

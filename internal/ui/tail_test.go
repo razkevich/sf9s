@@ -50,12 +50,22 @@ func TestTailOnlyReportsUnseenLogs(t *testing.T) {
 		t.Fatalf("unchanged poll should not add rows, got %d", got)
 	}
 
+	// Put the cursor on a specific log before new ones arrive.
+	drive(t, m, key("j"))
+	selected := lv.table.Cell("Id")
+	if selected != "07L2" {
+		t.Fatalf("precondition: cursor on 07L2, got %q", selected)
+	}
+
 	drive(t, m, tailResultMsg{gen: gen, res: logResult("07L3", "07L1", "07L2")})
 	if got := lv.table.RowCount(); got != 3 {
 		t.Fatalf("new log should be added, rows = %d", got)
 	}
-	if first := lv.table.CurrentRow(); first == nil || first[0] != "07L3" {
-		t.Fatalf("newest log should be on top, got %v", first)
+	if top := lv.result.Rows[0][0]; top != "07L3" {
+		t.Fatalf("newest log should be listed first, got %q", top)
+	}
+	if got := lv.table.Cell("Id"); got != selected {
+		t.Errorf("cursor should follow its log as rows shift, got %q want %q", got, selected)
 	}
 	if !strings.Contains(m.View(), "1 new log(s)") {
 		t.Fatalf("arrival should be announced:\n%s", m.View())
@@ -115,5 +125,38 @@ func TestTailErrorStopsAndReports(t *testing.T) {
 	}
 	if !strings.Contains(m.View(), "tail stopped: insufficient access") {
 		t.Fatalf("failure should be reported once:\n%s", m.View())
+	}
+}
+
+// Regression: the delete prompt used to re-read the cursor when the user
+// answered, so a log arriving in between made `y` delete the wrong log.
+func TestTailArrivalDoesNotRedirectDelete(t *testing.T) {
+	srv := testServer(t)
+	m := newTestModel(t, srv.URL)
+	loadAllOrgs(t, m)
+	lv := logsViewFor(t, m)
+	drive(t, m, logsListMsg{gen: lv.gen, res: logResult("07L1", "07L2")})
+
+	drive(t, m, key("t"))
+	drive(t, m, key("d")) // confirm prompt for the focused log
+	if lv.confirmDeleteID != "07L1" {
+		t.Fatalf("prompt should capture the focused log, got %q", lv.confirmDeleteID)
+	}
+	if !strings.Contains(m.View(), "delete log 07L1?") {
+		t.Fatalf("prompt should name the log it will delete:\n%s", m.View())
+	}
+
+	// A new log arrives while the prompt is up.
+	drive(t, m, tailResultMsg{gen: lv.tailGen, res: logResult("07LNEW", "07L1", "07L2")})
+	if lv.confirmDeleteID != "07L1" {
+		t.Fatalf("pending delete target must not change, got %q", lv.confirmDeleteID)
+	}
+
+	drive(t, m, key("y"))
+	if !strings.Contains(m.View(), "log deleted") && !strings.Contains(m.View(), "not found") {
+		t.Logf("view after delete:\n%s", m.View())
+	}
+	if lv.confirmDelete {
+		t.Error("prompt should close after answering")
 	}
 }

@@ -252,7 +252,7 @@ func TestJourneyApexLogSearchAndDelete(t *testing.T) {
 	h.key(tea.KeyEsc)
 
 	h.typeString("d")
-	h.waitFor(t, "delete selected log? y/n")
+	h.waitFor(t, "delete log 07LE2E0000001? y/n")
 	h.typeString("y")
 	h.waitFor(t, "log deleted")
 	if len(h.org.DeletedLogs) != 1 || h.org.DeletedLogs[0] != "07LE2E0000001" {

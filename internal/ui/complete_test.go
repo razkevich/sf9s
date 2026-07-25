@@ -168,3 +168,91 @@ func TestCompletionUnavailableSpotReportsWhy(t *testing.T) {
 		t.Fatalf("an explicit request should explain itself:\n%s", m.View())
 	}
 }
+
+func TestCursorOffsetSurvivesWrappingAndWideRunes(t *testing.T) {
+	srv := testServer(t)
+	m := newTestModel(t, srv.URL)
+	loadAllOrgs(t, m)
+	qv := queryViewFor(t, m)
+
+	// A line longer than the editor is soft-wrapped; the caret's byte offset
+	// must still be measured against the logical line.
+	qv.editor.SetWidth(40)
+	long := "SELECT Id, Name, OwnerId, CreatedDate, Nam"
+	qv.setEditorTextWithCursor(long, len(long))
+	if got := qv.cursorOffset(); got != len(long) {
+		t.Errorf("wrapped line: offset = %d, want %d", got, len(long))
+	}
+
+	// Double-width runes must not inflate the offset.
+	wide := "SELECT Id FROM Account WHERE Name='株式会社' AND Nam"
+	qv.setEditorTextWithCursor(wide, len(wide))
+	if got := qv.cursorOffset(); got != len(wide) {
+		t.Errorf("wide runes: offset = %d, want %d", got, len(wide))
+	}
+}
+
+func TestCompletionOnEarlierLineKeepsCaretThere(t *testing.T) {
+	srv := testServer(t)
+	m := newTestModel(t, srv.URL)
+	loadAllOrgs(t, m)
+	qv := queryViewFor(t, m)
+
+	// Cursor after "Nam" on line 1 of a two-line query.
+	text := "SELECT Id, Nam\nFROM Account"
+	caret := len("SELECT Id, Nam")
+	qv.setEditorTextWithCursor(text, caret)
+	if got := qv.cursorOffset(); got != caret {
+		t.Fatalf("caret should be on line 1 at %d, got %d", caret, got)
+	}
+	drive(t, m, tea.KeyMsg{Type: tea.KeyCtrlAt})
+	if got := qv.editor.Value(); got != "SELECT Id, Name\nFROM Account" {
+		t.Fatalf("completion produced %q", got)
+	}
+	// Typing must continue where the completion landed, not on the last line.
+	drive(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("X")})
+	if got := qv.editor.Value(); got != "SELECT Id, NameX\nFROM Account" {
+		t.Fatalf("caret drifted after accepting on an earlier line: %q", got)
+	}
+}
+
+func TestCompletionFollowsRelationshipPath(t *testing.T) {
+	srv := testServer(t)
+	m := newTestModel(t, srv.URL)
+	loadAllOrgs(t, m)
+	qv := queryViewFor(t, m)
+
+	// Owner. leads to User, whose fields (Id, Alias) should be offered.
+	text := "SELECT Owner. FROM Account"
+	caret := len("SELECT Owner.")
+	qv.setEditorTextWithCursor(text, caret)
+	drive(t, m, tea.KeyMsg{Type: tea.KeyCtrlAt})
+	if !qv.popup.open() {
+		t.Fatalf("relationship path should offer the target object's fields:\n%s", m.View())
+	}
+	var texts []string
+	for _, item := range qv.popup.items {
+		texts = append(texts, item.Text)
+	}
+	joined := strings.Join(texts, ",")
+	if !strings.Contains(joined, "Alias") {
+		t.Fatalf("expected User fields after Owner., got %v", texts)
+	}
+}
+
+func TestCompletionInsideStringLiteralOffersNothing(t *testing.T) {
+	srv := testServer(t)
+	m := newTestModel(t, srv.URL)
+	loadAllOrgs(t, m)
+	qv := queryViewFor(t, m)
+
+	text := "SELECT Id FROM Account WHERE Name = 'imported from Ac"
+	qv.setEditorTextWithCursor(text, len(text))
+	drive(t, m, tea.KeyMsg{Type: tea.KeyCtrlAt})
+	if qv.popup.open() {
+		t.Fatalf("no completion belongs inside a string literal:\n%s", m.View())
+	}
+	if got := qv.editor.Value(); got != text {
+		t.Fatalf("buffer must be untouched, got %q", got)
+	}
+}

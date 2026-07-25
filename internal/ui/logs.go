@@ -33,17 +33,21 @@ type logsView struct {
 	matches    []int
 	matchIdx   int
 
-	confirmDelete bool
+	confirmDelete   bool
+	confirmDeleteID string
 
-	tailing  bool
-	seen     map[string]bool
-	tailGen  int
-	newestID string
+	tailing bool
+	seen    map[string]bool
+	tailGen int
 }
 
 // tailInterval paces the ApexLog poll. The Tooling API offers no streaming
 // for debug logs, so tailing means polling; 2s matches `sf apex tail`.
 const tailInterval = 2 * time.Second
+
+// maxTailRows bounds a long-running tail; the newest logs are the interesting
+// ones, so older rows fall off rather than growing without limit.
+const maxTailRows = 2000
 
 func newLogsView(app *Model) *logsView {
 	v := &logsView{app: app, table: newDataTable(), seen: map[string]bool{}}
@@ -214,11 +218,12 @@ func (v *logsView) Update(msg tea.Msg) tea.Cmd {
 
 func (v *logsView) handleKey(msg tea.KeyMsg) tea.Cmd {
 	if v.confirmDelete {
-		v.confirmDelete = false
-		if msg.String() == "y" {
-			if id := v.table.Cell("Id"); id != "" {
-				return v.deleteLog(id)
-			}
+		id := v.confirmDeleteID
+		v.confirmDelete, v.confirmDeleteID = false, ""
+		if msg.String() == "y" && id != "" {
+			// The id was captured when the prompt opened: a tail poll can
+			// slide new rows under the cursor while the user decides.
+			return v.deleteLog(id)
 		}
 		return toast(statusInfo, "delete cancelled")
 	}
@@ -236,8 +241,9 @@ func (v *logsView) handleKey(msg tea.KeyMsg) tea.Cmd {
 			return v.openBody(id)
 		}
 	case "d":
-		if v.table.CurrentRow() != nil {
+		if id := v.table.Cell("Id"); id != "" {
 			v.confirmDelete = true
+			v.confirmDeleteID = id
 		}
 	case "t":
 		return v.toggleTail()
@@ -345,6 +351,12 @@ func (v *logsView) mergeTail(res *api.Result) int {
 	}
 	// Newest first: the fresh rows go on top of what is already listed.
 	combined := append(append([][]string{}, freshRows...), v.result.Rows...)
+	if len(combined) > maxTailRows {
+		combined = combined[:maxTailRows]
+	}
+	// Rows shift down as new ones arrive; keep the cursor on the same log so
+	// enter and delete still act on what the user selected.
+	focused := v.table.Cell("Id")
 	v.result = &api.Result{
 		TotalSize: res.TotalSize,
 		Done:      res.Done,
@@ -352,8 +364,19 @@ func (v *logsView) mergeTail(res *api.Result) int {
 		Rows:      combined,
 	}
 	v.table.SetDataPreservingView(res.Columns, combined)
-	v.newestID = ids[0]
+	if focused != "" {
+		v.table.FocusRowWhere(idColumn(res.Columns), focused)
+	}
 	return len(freshRows)
+}
+
+func idColumn(cols []string) int {
+	for i, c := range cols {
+		if c == "Id" {
+			return i
+		}
+	}
+	return 0
 }
 
 func (v *logsView) bodyKey(msg tea.KeyMsg) tea.Cmd {
@@ -442,7 +465,7 @@ func (v *logsView) View(width, height int) string {
 		head += styleDim.Render(fmt.Sprintf("  %d", v.result.TotalSize))
 	}
 	if v.confirmDelete {
-		head += "  " + styleErrText.Render("delete selected log? y/n")
+		head += "  " + styleErrText.Render("delete log "+v.confirmDeleteID+"? y/n")
 	}
 	v.table.SetSize(width, height-1)
 	return head + "\n" + v.table.View()
