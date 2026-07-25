@@ -1,0 +1,34 @@
+version: 2
+
+project_name: sf9s
+
+builds:
+  - main: ./cmd/sf9s
+    binary: sf9s
+    env: [CGO_ENABLED=0]
+    goos: [linux, darwin, windows]
+    goarch: [amd64, arm64]
+    flags: [-trimpath]
+    ldflags:
+      - -s -w -X main.version={{.Version}}
+
+archives:
+  - formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    files: [LICENSE, README.md]
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  use: github
+  sort: asc
+  filters:
+    exclude: ["^chore", "^docs", "^test"]
+
+release:
+  footer: |
+    ---
+    `sf9s` needs the [Salesforce CLI](https://developer.salesforce.com/tools/salesforcecli) on your PATH and at least one authenticated org (`sf org login web`).
