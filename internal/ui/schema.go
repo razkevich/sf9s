@@ -36,7 +36,7 @@ func (v *schemaView) Title() string { return "schema" }
 
 func (v *schemaView) Keys() []keyHint {
 	if v.inFields {
-		return []keyHint{{"y", "copy field"}, {"c", "build query"}, {"esc", "back"}, {"/", "filter"}}
+		return []keyHint{{"y", "copy field"}, {"c", "build query"}, {"s", "sort column"}, {"esc", "back"}, {"/", "filter"}}
 	}
 	return []keyHint{{"enter", "fields"}, {"y", "copy name"}, {"c", "build query"}, {"/", "filter"}}
 }

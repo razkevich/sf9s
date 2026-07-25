@@ -33,7 +33,7 @@ func (v *metaView) Title() string { return "meta" }
 
 func (v *metaView) Keys() []keyHint {
 	if v.inComps {
-		return []keyHint{{"y", "copy name"}, {"esc", "back"}, {"/", "filter"}}
+		return []keyHint{{"y", "copy name"}, {"s", "sort column"}, {"esc", "back"}, {"/", "filter"}}
 	}
 	return []keyHint{{"enter", "list components"}, {"R", "reload"}, {"/", "filter"}}
 }

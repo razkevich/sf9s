@@ -6,6 +6,7 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/mattn/go-runewidth"
 )
 
 type paletteItem struct {
@@ -170,9 +171,8 @@ func (p *palette) View(width, height int) string {
 	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, box)
 }
 
+// padRight pads to a display width, not a byte count: hints like "↑↓" and
+// "1…9" would otherwise misalign every column they appear in.
 func padRight(s string, w int) string {
-	for len(s) < w {
-		s += " "
-	}
-	return s
+	return runewidth.FillRight(s, w)
 }

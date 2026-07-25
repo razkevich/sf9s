@@ -67,7 +67,7 @@ func (v *logsView) Keys() []keyHint {
 	case v.tailing:
 		return []keyHint{{"t", "stop tail"}, {"enter", "open"}, {"/", "filter"}}
 	default:
-		return []keyHint{{"enter", "open"}, {"t", "tail"}, {"d", "delete"}, {"R", "refresh"}, {"/", "filter"}}
+		return []keyHint{{"enter", "open"}, {"t", "tail"}, {"s", "sort column"}, {"d", "delete"}, {"R", "refresh"}, {"/", "filter"}}
 	}
 }
 
@@ -258,6 +258,11 @@ func (v *logsView) handleKey(msg tea.KeyMsg) tea.Cmd {
 			v.confirmDelete = true
 			v.confirmDeleteID = id
 		}
+	case "s":
+		if label := v.table.SortByCursorColumn(); label != "" {
+			return toast(statusInfo, "sorted by "+label)
+		}
+		return toast(statusInfo, "sort cleared")
 	case "t":
 		return v.toggleTail()
 	case "R":

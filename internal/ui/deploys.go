@@ -33,7 +33,7 @@ func newDeploysView(app *Model) *deploysView {
 
 func (v *deploysView) Title() string { return "deploys" }
 func (v *deploysView) Keys() []keyHint {
-	return []keyHint{{"enter", "inspect"}, {"R", "refresh"}, {"/", "filter"}}
+	return []keyHint{{"enter", "inspect"}, {"s", "sort column"}, {"R", "refresh"}, {"/", "filter"}}
 }
 func (v *deploysView) Bail() bool {
 	switch {
@@ -96,6 +96,11 @@ func (v *deploysView) Update(msg tea.Msg) tea.Cmd {
 			if row := v.table.CurrentRow(); row != nil && v.result != nil {
 				v.card = newDetailCard("deployment", v.result.Columns, row, v.app.width, v.app.height-2)
 			}
+		case "s":
+			if label := v.table.SortByCursorColumn(); label != "" {
+				return toast(statusInfo, "sorted by "+label)
+			}
+			return toast(statusInfo, "sort cleared")
 		case "R":
 			return v.Init()
 		case "esc":

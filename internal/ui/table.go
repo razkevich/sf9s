@@ -3,6 +3,8 @@ package ui
 import (
 	"fmt"
 	"regexp"
+	"sort"
+	"strconv"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -35,10 +37,20 @@ type dataTable struct {
 
 	emptyText  string
 	cellStyles map[string]func(string) lipgloss.Style
+
+	// sortCol is the column the rows are ordered by (-1 = server order),
+	// sortDesc its direction. Sorting is a view over rows, never a mutation,
+	// so paging and exports keep the order the org returned.
+	sortCol  int
+	sortDesc bool
 }
 
 func newDataTable() *dataTable {
-	return &dataTable{emptyText: "no rows", cellStyles: map[string]func(string) lipgloss.Style{}}
+	return &dataTable{
+		emptyText:  "no rows",
+		cellStyles: map[string]func(string) lipgloss.Style{},
+		sortCol:    -1,
+	}
 }
 
 // SetCellStyle registers a semantic style for one column's cells.
@@ -176,7 +188,80 @@ func (t *dataTable) applyFilter() {
 			}
 		}
 	}
+	t.applySort()
 	t.clampScroll()
+}
+
+// applySort orders the visible rows. Values that both parse as numbers sort
+// numerically (so 9 comes before 10), everything else case-insensitively;
+// blanks always sink to the bottom, where they are least distracting.
+func (t *dataTable) applySort() {
+	if t.sortCol < 0 || t.sortCol >= len(t.cols) {
+		return
+	}
+	col := t.sortCol
+	sort.SliceStable(t.filtered, func(i, j int) bool {
+		a, b := t.cellAt(t.filtered[i], col), t.cellAt(t.filtered[j], col)
+		switch {
+		case a == "" && b == "":
+			return false
+		case a == "":
+			return false
+		case b == "":
+			return true
+		}
+		less := compareCells(a, b)
+		if t.sortDesc {
+			return !less && a != b
+		}
+		return less
+	})
+}
+
+func compareCells(a, b string) bool {
+	af, aerr := strconv.ParseFloat(a, 64)
+	bf, berr := strconv.ParseFloat(b, 64)
+	if aerr == nil && berr == nil {
+		return af < bf
+	}
+	la, lb := strings.ToLower(a), strings.ToLower(b)
+	if la != lb {
+		return la < lb
+	}
+	return a < b
+}
+
+func (t *dataTable) cellAt(row, col int) string {
+	r := t.rows[row]
+	if col >= len(r) {
+		return ""
+	}
+	return r[col]
+}
+
+// SortByCursorColumn orders by the column currently in view, toggling
+// direction when it is already the sort column, and clearing on a third press.
+func (t *dataTable) SortByCursorColumn() string {
+	if len(t.cols) == 0 {
+		return ""
+	}
+	col := clampInt(t.colOff, 0, len(t.cols)-1)
+	switch {
+	case t.sortCol != col:
+		t.sortCol, t.sortDesc = col, false
+	case !t.sortDesc:
+		t.sortDesc = true
+	default:
+		t.sortCol, t.sortDesc = -1, false
+		t.applyFilter()
+		return ""
+	}
+	t.applyFilter()
+	arrow := "▲"
+	if t.sortDesc {
+		arrow = "▼"
+	}
+	return t.cols[col] + " " + arrow
 }
 
 func (t *dataTable) clampScroll() {
@@ -360,6 +445,13 @@ func (t *dataTable) renderRow(cells []string, lastCol int, kind rowKind) string 
 		raw := ""
 		if i < len(cells) {
 			raw = cells[i]
+		}
+		if kind == rowHeader && i == t.sortCol {
+			marker := " ▲"
+			if t.sortDesc {
+				marker = " ▼"
+			}
+			raw = runewidth.Truncate(raw, max(w-2, 1), "") + marker
 		}
 		cell := runewidth.FillRight(runewidth.Truncate(raw, w, "…"), w)
 		if kind == rowPlain {

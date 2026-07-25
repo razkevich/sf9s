@@ -13,6 +13,7 @@ import (
 	"github.com/charmbracelet/bubbles/textarea"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/mattn/go-runewidth"
 
 	"github.com/razkevich/sf9s/internal/api"
 	"github.com/razkevich/sf9s/internal/config"
@@ -83,6 +84,7 @@ func (v *queryView) Keys() []keyHint {
 			{"tab", "edit query"},
 			{"enter", "inspect row"},
 			{"y/Y", "copy cell/row"},
+			{"s", "sort column"},
 			{"m", "fetch more"},
 			{"e/E", "export CSV/JSON"},
 			{"/", "filter"},
@@ -488,6 +490,11 @@ func (v *queryView) handleKey(msg tea.KeyMsg) tea.Cmd {
 				v.card = newDetailCard("record", v.result.Columns, row, v.app.width, v.app.height-2)
 			}
 			return nil
+		case "s":
+			if label := v.table.SortByCursorColumn(); label != "" {
+				return toast(statusInfo, "sorted by "+label)
+			}
+			return toast(statusInfo, "sort cleared")
 		case "m":
 			return v.fetchMore()
 		case "y":
@@ -619,6 +626,11 @@ func (v *queryView) pickerKey(msg tea.KeyMsg) tea.Cmd {
 	return nil
 }
 
+// collapse renders a multi-line query as one line for the compact editor.
+func collapse(q string) string {
+	return strings.Join(strings.Fields(q), " ")
+}
+
 // csvSafe neutralizes leading characters that spreadsheet apps execute as
 // formulas, so exported org data can't run on open.
 func csvSafe(s string) string {
@@ -734,22 +746,28 @@ func (v *queryView) View(width, height int) string {
 		}
 	}
 
-	// Shrink the editor before sacrificing result rows on short terminals:
-	// head(1) + editor(edH+2) + resultHead(1) + table(>=3) must fit height.
-	edH := min(editorHeight, max(1, height-7))
-	v.editor.SetHeight(edH)
-	editorBox := styleEditorBlurred
-	if !v.focusResults {
-		editorBox = styleEditorFocused
+	// While you are reading results the query is reference material, not a
+	// workspace: collapse it to one line and give the rows the space back.
+	// tab (or esc) returns to the full editor.
+	var editor string
+	edH := 1
+	if v.focusResults {
+		editor = styleDim.Render("  " + runewidth.Truncate(collapse(v.editor.Value()), width-4, "…"))
+	} else {
+		// Shrink before sacrificing result rows on short terminals:
+		// head(1) + editor(edH+2) + resultHead(1) + table(>=3) must fit.
+		edH = min(editorHeight, max(1, height-7))
+		v.editor.SetHeight(edH)
+		editor = styleEditorFocused.Width(width - 2).Render(v.editor.View())
+		edH += 2 // border
 	}
-	editor := editorBox.Width(width - 2).Render(v.editor.View())
 
-	tableH := max(height-edH-4, 3)
+	tableH := max(height-edH-2, 3)
 	if v.popup.open() {
 		// Keep results visible under the suggestions when there's room.
 		popup := v.popup.View(width)
 		popupH := lipgloss.Height(popup)
-		remaining := height - edH - 3 - popupH
+		remaining := height - edH - 1 - popupH
 		if remaining < 4 {
 			return head + "\n" + editor + "\n" + popup
 		}

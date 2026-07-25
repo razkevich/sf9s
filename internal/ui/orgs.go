@@ -36,6 +36,7 @@ func (v *orgsView) Keys() []keyHint {
 		{"y", "copy token"},
 		{"Y", "copy URL"},
 		{"R", "reload orgs"},
+		{"s", "sort column"},
 	}
 }
 
@@ -113,6 +114,11 @@ func (v *orgsView) Update(msg tea.Msg) tea.Cmd {
 				}
 				return tea.Batch(cmds...)
 			}
+		case "s":
+			if label := v.table.SortByCursorColumn(); label != "" {
+				return toast(statusInfo, "sorted by "+label)
+			}
+			return toast(statusInfo, "sort cleared")
 		case "o":
 			return v.openOrg()
 		case "y":
