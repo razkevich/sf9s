@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 )
@@ -125,6 +126,11 @@ func TestCacheKeyCannotEscapeCacheDir(t *testing.T) {
 }
 
 func TestPersistedFilesArePrivate(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		// Windows has no Unix mode bits; Go reports 0666/0777 regardless of
+		// the ACLs that actually govern access under the user profile.
+		t.Skip("permission bits are not meaningful on Windows")
+	}
 	s := tempStore(t)
 	s.SavedQueries()
 	s.AppendHistory("SELECT Id FROM Contact WHERE Email = 'a@b.c'")
