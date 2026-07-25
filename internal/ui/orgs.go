@@ -36,7 +36,13 @@ func (v *orgsView) Capturing() bool { return v.table.Filtering() }
 
 func (v *orgsView) Init() tea.Cmd { return nil }
 
+// setOrgs refreshes the table while preserving the user's cursor and filter,
+// since statuses stream in after the first paint.
 func (v *orgsView) setOrgs(orgs []sfcli.Org) {
+	cursorUser := ""
+	if row := v.table.CurrentRow(); row != nil {
+		cursorUser = row[2]
+	}
 	v.orgs = orgs
 	rows := make([][]string, len(orgs))
 	for i, o := range orgs {
@@ -47,10 +53,16 @@ func (v *orgsView) setOrgs(orgs []sfcli.Org) {
 		if o.IsDefaultHub {
 			marker += "★"
 		}
-		expires := o.ExpirationDate
-		rows[i] = []string{marker, o.Title(), o.Username, o.Type(), o.ConnectedStatus, expires, o.InstanceURL}
+		status := o.ConnectedStatus
+		if status == "" {
+			status = "checking…"
+		}
+		rows[i] = []string{marker, o.Title(), o.Username, o.Type(), status, o.ExpirationDate, o.InstanceURL}
 	}
-	v.table.SetData([]string{" ", "Alias", "Username", "Type", "Status", "Expires", "Instance URL"}, rows)
+	v.table.SetDataPreservingView([]string{" ", "Alias", "Username", "Type", "Status", "Expires", "Instance URL"}, rows)
+	if cursorUser != "" {
+		v.table.FocusRowWhere(2, cursorUser)
+	}
 }
 
 func (v *orgsView) selected() *sfcli.Org {
@@ -160,7 +172,9 @@ func (v *orgsView) withCreds(pending string, fn func(token, instanceURL string) 
 func (v *orgsView) View(width, height int) string {
 	v.table.SetSize(width, height-1)
 	head := styleTitle.Render(fmt.Sprintf("Authenticated orgs (%d)", len(v.orgs)))
-	if v.busy {
+	if v.app.awaitingStatuses {
+		head += "  " + v.app.spin.View() + styleDim.Render(" checking connections…")
+	} else if v.busy {
 		head += "  " + v.app.spin.View()
 	}
 	return head + "\n" + v.table.View()

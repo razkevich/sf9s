@@ -67,6 +67,30 @@ func (t *dataTable) SetData(cols []string, rows [][]string) {
 	t.applyFilter()
 }
 
+// SetDataPreservingView replaces the data but keeps the active filter,
+// cursor and scroll position — used when a background pass enriches rows
+// that are already on screen.
+func (t *dataTable) SetDataPreservingView(cols []string, rows [][]string) {
+	cursor, top, colOff, filter := t.cursor, t.top, t.colOff, t.filter
+	t.SetData(cols, rows)
+	t.filter = filter
+	t.applyFilter()
+	t.cursor, t.top, t.colOff = cursor, top, colOff
+	t.clampScroll()
+}
+
+// FocusRowWhere moves the cursor to the row whose column col equals value.
+func (t *dataTable) FocusRowWhere(col int, value string) {
+	for i, idx := range t.filtered {
+		row := t.rows[idx]
+		if col < len(row) && row[col] == value {
+			t.cursor = i
+			t.clampScroll()
+			return
+		}
+	}
+}
+
 // AppendRows adds rows without resetting cursor/filter (queryMore).
 func (t *dataTable) AppendRows(rows [][]string) {
 	for _, row := range rows {
@@ -366,4 +390,13 @@ func (t *dataTable) footer(lastCol int) string {
 
 func clampInt(v, lo, hi int) int {
 	return max(lo, min(v, hi))
+}
+
+// CurrentCell returns the value under the cursor in the focused column.
+func (t *dataTable) CurrentCell() string {
+	row := t.CurrentRow()
+	if row == nil || t.colOff >= len(row) {
+		return ""
+	}
+	return row[t.colOff]
 }

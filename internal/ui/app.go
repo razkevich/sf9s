@@ -70,9 +70,10 @@ type Model struct {
 
 	width, height int
 
-	orgs        []sfcli.Org
-	orgsErr     error
-	loadingOrgs bool
+	orgs             []sfcli.Org
+	orgsErr          error
+	loadingOrgs      bool
+	awaitingStatuses bool
 
 	current *sfcli.Org
 	client  *api.Client
@@ -120,18 +121,41 @@ func New(deps Deps) *Model {
 	return m
 }
 
+// orgCacheKey names the on-disk org inventory. Rendering it first makes
+// relaunches instant; every launch still refreshes in the background because
+// the sf CLI (a Node process) needs seconds to answer.
+const orgCacheKey = "orgs-inventory"
+
+const orgCacheTTL = 30 * 24 * time.Hour
+
 func (m *Model) Init() tea.Cmd {
-	return tea.Batch(m.loadOrgs(), m.spin.Tick)
+	cmds := []tea.Cmd{m.loadOrgs(), m.spin.Tick}
+	var cached []sfcli.Org
+	if m.deps.Store.CacheGet(orgCacheKey, orgCacheTTL, &cached) && len(cached) > 0 {
+		cmds = append([]tea.Cmd{func() tea.Msg {
+			return orgsLoadedMsg{orgs: cached, partial: true, cached: true}
+		}}, cmds...)
+	}
+	return tea.Batch(cmds...)
 }
 
+// loadOrgs renders the org inventory as soon as it is known, then fills in
+// connection statuses; probing statuses costs seconds per authenticated org.
 func (m *Model) loadOrgs() tea.Cmd {
 	sf := m.deps.SF
-	return func() tea.Msg {
+	fast := func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		defer cancel()
+		orgs, err := sf.OrgsFast(ctx)
+		return orgsLoadedMsg{orgs: orgs, err: err, partial: true}
+	}
+	statuses := func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 		defer cancel()
 		orgs, err := sf.Orgs(ctx)
 		return orgsLoadedMsg{orgs: orgs, err: err}
 	}
+	return tea.Batch(fast, statuses)
 }
 
 func (m *Model) currentView() view {
@@ -206,20 +230,34 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 
 	case orgsLoadedMsg:
-		m.loadingOrgs = false
+		if msg.cached && (len(m.orgs) > 0 || m.orgsErr != nil) {
+			return m, nil // live data already arrived
+		}
 		if msg.err != nil {
+			if msg.partial && len(m.orgs) > 0 {
+				return m, nil // the status pass will report it
+			}
+			m.loadingOrgs = false
 			// A failed reload must not nuke a working session; the fatal
 			// screen is only for startup, before any orgs are known.
 			if len(m.orgs) > 0 {
+				m.awaitingStatuses = false
 				return m, toast(statusError, "org reload failed: "+msg.err.Error())
 			}
 			m.orgsErr = msg.err
 			return m, nil
 		}
+		m.loadingOrgs = false
 		m.orgsErr = nil
-		m.orgs = msg.orgs
+		m.awaitingStatuses = msg.partial
+		if msg.partial {
+			m.orgs = msg.orgs
+		} else {
+			m.orgs = mergeOrgStatuses(m.orgs, msg.orgs)
+			m.deps.Store.CachePut(orgCacheKey, m.orgs)
+		}
 		if ov, ok := m.views[ViewOrgs].(*orgsView); ok {
-			ov.setOrgs(msg.orgs)
+			ov.setOrgs(m.orgs)
 		} else {
 			m.currentView()
 		}
@@ -279,6 +317,38 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 	return m, tea.Batch(cmds...)
+}
+
+// mergeOrgStatuses folds connection statuses from the slow pass into the rows
+// already on screen, keeping the fast pass's ordering and adding any org the
+// fast pass didn't report.
+func mergeOrgStatuses(current, withStatus []sfcli.Org) []sfcli.Org {
+	if len(current) == 0 {
+		return withStatus
+	}
+	statuses := make(map[string]sfcli.Org, len(withStatus))
+	for _, o := range withStatus {
+		statuses[o.Username] = o
+	}
+	merged := make([]sfcli.Org, 0, len(withStatus))
+	seen := make(map[string]bool, len(current))
+	for _, o := range current {
+		seen[o.Username] = true
+		if full, ok := statuses[o.Username]; ok {
+			merged = append(merged, full)
+			continue
+		}
+		// Present in the fast pass but not the status pass (revoked or
+		// removed between calls) — keep the row, mark it unknown.
+		o.ConnectedStatus = "Unknown"
+		merged = append(merged, o)
+	}
+	for _, o := range withStatus {
+		if !seen[o.Username] {
+			merged = append(merged, o)
+		}
+	}
+	return merged
 }
 
 func (m *Model) autoSelectOrg() tea.Cmd {

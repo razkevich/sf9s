@@ -233,9 +233,25 @@ func New(runner Runner) *Client {
 	return &Client{runner: runner}
 }
 
-// Orgs lists every authenticated org, deduplicated by username.
+// Orgs lists every authenticated org, deduplicated by username, including
+// each org's live connection status.
 func (c *Client) Orgs(ctx context.Context) ([]Org, error) {
-	out, err := c.runner.Run(ctx, "org", "list")
+	return c.orgs(ctx, false)
+}
+
+// OrgsFast lists orgs without probing connection status. `sf org list`
+// contacts every org serially, which costs seconds per org; sf9s renders this
+// result first and fills statuses in from Orgs afterward.
+func (c *Client) OrgsFast(ctx context.Context) ([]Org, error) {
+	return c.orgs(ctx, true)
+}
+
+func (c *Client) orgs(ctx context.Context, skipStatus bool) ([]Org, error) {
+	args := []string{"org", "list"}
+	if skipStatus {
+		args = append(args, "--skip-connection-status")
+	}
+	out, err := c.runner.Run(ctx, args...)
 	if err != nil {
 		return nil, err
 	}

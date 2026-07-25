@@ -255,6 +255,67 @@ func TestJourneyMetadataBrowser(t *testing.T) {
 	h.quit(t)
 }
 
+func TestJourneySOQLCompletion(t *testing.T) {
+	h := start(t)
+	h.waitFor(t, "Authenticated orgs (3)")
+	h.key(tea.KeyEnter)
+	h.waitFor(t, "SOQL")
+
+	// Ambiguous object prefix opens the picker; the schema is fetched on
+	// demand and the request is honored once it lands.
+	h.typeString("SELECT Id FROM C")
+	h.tm.Send(tea.KeyMsg{Type: tea.KeyCtrlAt})
+	h.waitFor(t, "Contact", "enter/tab accept")
+	h.key(tea.KeyEnter)
+	h.waitFor(t, "SELECT Id FROM Contact")
+
+	h.quit(t)
+}
+
+func TestJourneyFieldCompletionAndRun(t *testing.T) {
+	h := start(t)
+	h.waitFor(t, "Authenticated orgs (3)")
+	h.key(tea.KeyEnter)
+	h.waitFor(t, "SOQL")
+
+	// A unique field prefix completes in place, resolved from the FROM
+	// clause typed after the cursor position.
+	h.typeString("SELECT Ind FROM Account")
+	for range " FROM Account" {
+		h.key(tea.KeyLeft)
+	}
+	h.tm.Send(tea.KeyMsg{Type: tea.KeyCtrlAt})
+	h.waitFor(t, "SELECT Industry FROM Account")
+
+	// And the completed statement actually runs.
+	h.key(tea.KeyCtrlR)
+	h.waitFor(t, "Acme Rockets")
+	h.quit(t)
+}
+
+func TestJourneyCopyCellAndRow(t *testing.T) {
+	h := start(t)
+	h.waitFor(t, "Authenticated orgs (3)")
+	h.key(tea.KeyEnter)
+	h.typeString("SELECT Id, Name FROM Account")
+	h.key(tea.KeyCtrlR)
+	h.waitFor(t, "Acme Rockets")
+
+	h.typeString("y")
+	h.waitFor(t, "copied cell")
+	if last := (*h.copied)[len(*h.copied)-1]; last != "001E2E000000001" {
+		t.Fatalf("y should copy the focused cell, got %q", last)
+	}
+
+	h.typeString("Y")
+	h.waitFor(t, "copied row as JSON")
+	last := (*h.copied)[len(*h.copied)-1]
+	if !strings.Contains(last, `"Name": "Acme Rockets"`) || !strings.Contains(last, `"Id": "001E2E000000001"`) {
+		t.Fatalf("Y should copy the row as JSON, got %q", last)
+	}
+	h.quit(t)
+}
+
 func TestJourneySavedQueriesPicker(t *testing.T) {
 	h := start(t)
 	h.waitFor(t, "Authenticated orgs (3)")

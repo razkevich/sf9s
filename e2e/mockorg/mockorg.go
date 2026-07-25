@@ -73,9 +73,17 @@ func New() *Server {
 
 	mux.HandleFunc("GET /services/data/v64.0/sobjects/{name}/describe", func(w http.ResponseWriter, r *http.Request) {
 		name := r.PathValue("name")
+		if name == "User" {
+			fmt.Fprint(w, `{"name":"User","label":"User","keyPrefix":"005","fields":[
+				{"name":"Id","label":"User ID","type":"id"},
+				{"name":"Alias","label":"Alias","type":"string","length":8},
+				{"name":"ManagerId","label":"Manager ID","type":"reference","referenceTo":["User"],"relationshipName":"Manager"}]}`)
+			return
+		}
 		fmt.Fprintf(w, `{"name":%q,"label":%q,"keyPrefix":"001","fields":[
 			{"name":"Id","label":"Record ID","type":"id"},
 			{"name":"Name","label":"Name","type":"string","length":255,"nillable":false,"createable":true,"updateable":true},
+			{"name":"OwnerId","label":"Owner ID","type":"reference","referenceTo":["User"],"relationshipName":"Owner"},
 			{"name":"Industry","label":"Industry","type":"picklist","nillable":true,"createable":true,"updateable":true,"picklistValues":[{"label":"Technology","value":"Technology","active":true},{"label":"Energy","value":"Energy","active":true}]}]}`, name, name)
 	})
 

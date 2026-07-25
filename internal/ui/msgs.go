@@ -33,6 +33,12 @@ func toastErr(err error) tea.Cmd {
 type orgsLoadedMsg struct {
 	orgs []sfcli.Org
 	err  error
+	// partial marks the fast (status-free) first pass; a second message
+	// follows with connection statuses filled in.
+	partial bool
+	// cached marks rows restored from disk, which must never overwrite
+	// fresher data already on screen.
+	cached bool
 }
 
 // goBackMsg asks the root model to navigate back to the orgs home view.

@@ -15,6 +15,7 @@ import (
 
 	"github.com/razkevich/sf9s/internal/api"
 	"github.com/razkevich/sf9s/internal/config"
+	"github.com/razkevich/sf9s/internal/soql"
 )
 
 const editorHeight = 5
@@ -44,6 +45,12 @@ type queryView struct {
 	showPicker bool
 
 	card *detailCard
+
+	comp  *completer
+	popup *completionPopup
+	// pendingComplete remembers an explicit completion request made while
+	// the schema was still loading, so it fires once the schema arrives.
+	pendingComplete bool
 }
 
 func newQueryView(app *Model) *queryView {
@@ -60,6 +67,7 @@ func newQueryView(app *Model) *queryView {
 	}
 	v.table.emptyText = "no results yet — write a query and hit ctrl+r"
 	v.history = app.deps.Store.History()
+	v.comp = newCompleter(app)
 	return v
 }
 
@@ -71,18 +79,22 @@ func (v *queryView) Hints() string {
 		api = "Tooling"
 	}
 	if v.focusResults {
-		return fmt.Sprintf("[%s] tab edit • enter card • m more • e/E export • ctrl+r rerun", api)
+		return fmt.Sprintf("[%s] tab edit • enter card • y/Y copy cell/row • m more • e/E export", api)
 	}
-	return fmt.Sprintf("[%s] ctrl+r run • ctrl+t tooling • ctrl+p/n history • ctrl+s saved • tab results", api)
+	return fmt.Sprintf("[%s] ctrl+r run • tab complete • ctrl+t tooling • ctrl+p/n history • ctrl+s saved", api)
 }
 
 func (v *queryView) Capturing() bool {
-	return !v.focusResults || v.showPicker || v.card != nil || v.table.Filtering()
+	return !v.focusResults || v.showPicker || v.card != nil || v.table.Filtering() || v.popup.open()
 }
 
-func (v *queryView) Init() tea.Cmd { return textarea.Blink }
+func (v *queryView) Init() tea.Cmd {
+	return tea.Batch(textarea.Blink, v.comp.warm())
+}
 
 func (v *queryView) resetOrg() {
+	v.popup = nil
+	v.comp.reset()
 	v.gen = v.app.nextGen()
 	v.running = false
 	v.result = nil
@@ -108,8 +120,8 @@ type queryDoneMsg struct {
 }
 
 func (v *queryView) runQuery() tea.Cmd {
-	soql := strings.TrimSpace(v.editor.Value())
-	if soql == "" {
+	stmt := strings.TrimSpace(v.editor.Value())
+	if stmt == "" {
 		return toast(statusWarn, "nothing to run")
 	}
 	if v.app.client == nil {
@@ -126,8 +138,8 @@ func (v *queryView) runQuery() tea.Cmd {
 		ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 		defer cancel()
 		start := time.Now()
-		res, err := client.Query(ctx, soql, tooling)
-		hist, _ := store.AppendHistory(soql)
+		res, err := client.Query(ctx, stmt, tooling)
+		hist, _ := store.AppendHistory(stmt)
 		return queryDoneMsg{gen: gen, res: res, err: err, elapsed: time.Since(start), history: hist}
 	}
 }
@@ -204,12 +216,151 @@ func (v *queryView) Update(msg tea.Msg) tea.Cmd {
 	case tea.KeyMsg:
 		return v.handleKey(msg)
 	}
+	if mine, err := v.comp.Update(msg); mine {
+		pending := v.pendingComplete
+		v.pendingComplete = false
+		if err != nil {
+			if pending {
+				return toast(statusError, "schema unavailable: "+err.Error())
+			}
+			return nil
+		}
+		// Schema arrived: honor a request that couldn't be served yet, and
+		// keep an open popup filling in live.
+		if pending {
+			return v.openPopup(true)
+		}
+		return v.refreshPopup()
+	}
 	if !v.focusResults {
 		var cmd tea.Cmd
 		v.editor, cmd = v.editor.Update(msg)
 		return cmd
 	}
 	return nil
+}
+
+// cursorOffset converts the textarea's line/column cursor into a byte offset
+// in the full editor text.
+func (v *queryView) cursorOffset() int {
+	text := v.editor.Value()
+	lines := strings.Split(text, "\n")
+	row := min(v.editor.Line(), len(lines)-1)
+	offset := 0
+	for i := 0; i < row; i++ {
+		offset += len(lines[i]) + 1
+	}
+	col := v.editor.LineInfo().CharOffset
+	line := lines[row]
+	if runes := []rune(line); col <= len(runes) {
+		offset += len(string(runes[:col]))
+	} else {
+		offset += len(line)
+	}
+	return min(offset, len(text))
+}
+
+// wordBeforeCursor reports whether the character left of the cursor is part
+// of an identifier, i.e. there is a prefix worth completing.
+func (v *queryView) wordBeforeCursor() bool {
+	text := v.editor.Value()
+	offset := v.cursorOffset()
+	if offset == 0 || offset > len(text) {
+		return false
+	}
+	c := text[offset-1]
+	return c == '_' || c == '.' || c == '$' ||
+		(c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+}
+
+// openPopup computes candidates at the cursor. explicit distinguishes a user
+// request (ctrl+space, which reports why nothing matched) from the implicit
+// refresh after each keystroke.
+func (v *queryView) openPopup(explicit bool) tea.Cmd {
+	text := v.editor.Value()
+	cursor := v.cursorOffset()
+	items, sctx, cmd := v.comp.Candidates(text, cursor)
+	if len(items) == 0 {
+		v.popup = nil
+		// A request that arrives while the schema is still downloading is
+		// remembered, not refused.
+		if explicit && (cmd != nil || v.comp.loading()) {
+			v.pendingComplete = true
+			if cmd == nil {
+				return toast(statusInfo, "loading schema…")
+			}
+			return tea.Batch(cmd, toast(statusInfo, "loading schema…"))
+		}
+		if explicit {
+			switch {
+			case sctx.Clause == soql.ClauseUnknown:
+				return toast(statusInfo, "no completions here — try inside SELECT, after FROM, or in WHERE")
+			case sctx.Object == "":
+				return toast(statusInfo, "type the FROM object first, then fields complete")
+			default:
+				return toast(statusInfo, "no match for "+sctx.Prefix)
+			}
+		}
+		return cmd
+	}
+	_, partial := sctx.RelationshipPath()
+	v.popup = &completionPopup{
+		items:   items,
+		replace: [2]int{cursor - len(partial), cursor},
+	}
+	if len(items) == 1 && explicit {
+		return tea.Batch(cmd, v.acceptCompletion())
+	}
+	return cmd
+}
+
+// refreshPopup recomputes an open popup in place, closing it when the cursor
+// moves somewhere with nothing to offer.
+func (v *queryView) refreshPopup() tea.Cmd {
+	if v.popup == nil {
+		return nil
+	}
+	return v.openPopup(false)
+}
+
+// acceptCompletion inserts the highlighted candidate over the typed prefix.
+func (v *queryView) acceptCompletion() tea.Cmd {
+	if !v.popup.open() {
+		return nil
+	}
+	candidate := v.popup.selected()
+	text := v.editor.Value()
+	start, end := v.popup.replace[0], v.popup.replace[1]
+	if start < 0 || end > len(text) || start > end {
+		v.popup = nil
+		return nil
+	}
+	updated := text[:start] + candidate.Text + text[end:]
+	caret := start + len(candidate.Text)
+	v.popup = nil
+	v.setEditorTextWithCursor(updated, caret)
+	// A relationship candidate ("Owner.") continues the path — offer the
+	// target object's fields immediately.
+	if strings.HasSuffix(candidate.Text, ".") {
+		return v.openPopup(false)
+	}
+	return nil
+}
+
+// setEditorTextWithCursor replaces the buffer and places the caret at a byte
+// offset, which the textarea only exposes via line/column moves.
+func (v *queryView) setEditorTextWithCursor(text string, offset int) {
+	v.editor.SetValue(text)
+	before := text[:min(offset, len(text))]
+	lines := strings.Split(before, "\n")
+	v.editor.CursorStart()
+	for i := 0; i < len(lines)-1; i++ {
+		v.editor.CursorDown()
+	}
+	v.editor.CursorStart()
+	for range []rune(lines[len(lines)-1]) {
+		v.editor.SetCursor(v.editor.LineInfo().CharOffset + 1)
+	}
 }
 
 func (v *queryView) handleKey(msg tea.KeyMsg) tea.Cmd {
@@ -223,8 +374,31 @@ func (v *queryView) handleKey(msg tea.KeyMsg) tea.Cmd {
 		return v.pickerKey(msg)
 	}
 
+	// The completion popup owns navigation keys while it is open.
+	if v.popup.open() {
+		switch msg.String() {
+		case "up", "ctrl+p":
+			v.popup.move(-1)
+			return nil
+		case "down", "ctrl+n":
+			v.popup.move(1)
+			return nil
+		case "enter", "tab":
+			return v.acceptCompletion()
+		case "esc":
+			v.popup = nil
+			return nil
+		}
+	}
+
 	switch msg.String() {
+	case "ctrl+space", "ctrl+@":
+		if !v.focusResults {
+			v.pendingComplete = false
+			return v.openPopup(true)
+		}
 	case "ctrl+r":
+		v.popup = nil
 		return v.runQuery()
 	case "ctrl+t":
 		v.tooling = !v.tooling
@@ -236,6 +410,12 @@ func (v *queryView) handleKey(msg tea.KeyMsg) tea.Cmd {
 	case "ctrl+s":
 		return v.openPicker()
 	case "tab":
+		// In the editor, tab completes when the cursor follows a word —
+		// shell-style — and otherwise switches panes.
+		if !v.focusResults && v.wordBeforeCursor() {
+			v.pendingComplete = false
+			return v.openPopup(true)
+		}
 		v.focusResults = !v.focusResults
 		if v.focusResults {
 			v.editor.Blur()
@@ -257,6 +437,31 @@ func (v *queryView) handleKey(msg tea.KeyMsg) tea.Cmd {
 			return nil
 		case "m":
 			return v.fetchMore()
+		case "y":
+			if cell := v.table.CurrentCell(); cell != "" {
+				if err := v.app.deps.Clipboard(cell); err != nil {
+					return toastErr(err)
+				}
+				return toast(statusOK, fmt.Sprintf("copied cell (%d chars)", len(cell)))
+			}
+			return toast(statusWarn, "cell is empty")
+		case "Y":
+			if row := v.table.CurrentRow(); row != nil {
+				rec := map[string]string{}
+				for i, col := range v.result.Columns {
+					if i < len(row) {
+						rec[col] = row[i]
+					}
+				}
+				raw, err := json.MarshalIndent(rec, "", "  ")
+				if err != nil {
+					return toastErr(err)
+				}
+				if err := v.app.deps.Clipboard(string(raw)); err != nil {
+					return toastErr(err)
+				}
+				return toast(statusOK, fmt.Sprintf("copied row as JSON (%d fields)", len(rec)))
+			}
 		case "e":
 			return v.export("csv")
 		case "E":
@@ -282,6 +487,10 @@ func (v *queryView) handleKey(msg tea.KeyMsg) tea.Cmd {
 	}
 	var cmd tea.Cmd
 	v.editor, cmd = v.editor.Update(msg)
+	// Keep an open popup in sync with what's being typed.
+	if v.popup != nil {
+		return tea.Batch(cmd, v.refreshPopup())
+	}
 	return cmd
 }
 
@@ -481,6 +690,11 @@ func (v *queryView) View(width, height int) string {
 		editorBox = styleEditorFocused
 	}
 	editor := editorBox.Width(width - 2).Render(v.editor.View())
+
+	if v.popup.open() {
+		popup := v.popup.View(width)
+		return head + "\n" + editor + "\n" + popup
+	}
 
 	tableH := max(height-edH-4, 3)
 	v.table.SetSize(width, tableH)

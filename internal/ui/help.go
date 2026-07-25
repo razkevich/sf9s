@@ -47,10 +47,11 @@ var viewHelp = map[ViewID][][2]string{
 	},
 	ViewQuery: {
 		{"ctrl+r", "run query"},
+		{"tab / ctrl+space", "complete object or field at cursor"},
 		{"ctrl+t", "toggle Tooling API"},
 		{"ctrl+p / ctrl+n", "history prev / next"},
 		{"ctrl+s", "saved query library"},
-		{"tab", "switch editor ⇄ results"},
+		{"tab (no prefix)", "switch editor ⇄ results"},
 		{"enter (results)", "inspect row as a card"},
 		{"m (results)", "fetch next page"},
 		{"e / E (results)", "export CSV / JSON"},

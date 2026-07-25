@@ -22,11 +22,17 @@ type fakeRunner struct{ out map[string]string }
 
 func (f fakeRunner) Run(_ context.Context, args ...string) ([]byte, error) {
 	key := strings.Join(args, " ")
-	out, ok := f.out[key]
-	if !ok {
-		return []byte(`{"status":1,"message":"unexpected command: ` + key + `"}`), nil
+	if out, ok := f.out[key]; ok {
+		return []byte(out), nil
 	}
-	return []byte(out), nil
+	// The fast org-list pass differs only by flag; reuse the same fixture
+	// unless a test supplies a distinct one.
+	if base := strings.TrimSuffix(key, " --skip-connection-status"); base != key {
+		if out, ok := f.out[base]; ok {
+			return []byte(out), nil
+		}
+	}
+	return []byte(`{"status":1,"message":"unexpected command: ` + key + `"}`), nil
 }
 
 func testServer(t *testing.T) *httptest.Server {
@@ -38,9 +44,18 @@ func testServer(t *testing.T) *httptest.Server {
 				{"attributes":{"type":"Account"},"Id":"001A","Name":"Acme"},
 				{"attributes":{"type":"Account"},"Id":"001B","Name":"Globex"}]}`))
 		case r.URL.Path == "/services/data/v64.0/sobjects":
-			w.Write([]byte(`{"sobjects":[{"name":"Account","label":"Account","custom":false,"keyPrefix":"001","queryable":true},{"name":"Hidden","label":"Hidden","queryable":false}]}`))
-		case r.URL.Path == "/services/data/v64.0/sobjects/Account/describe":
-			w.Write([]byte(`{"name":"Account","label":"Account","keyPrefix":"001","fields":[{"name":"Id","label":"Account ID","type":"id"},{"name":"Name","label":"Name","type":"string","length":255,"nillable":false,"createable":true,"updateable":true}]}`))
+			w.Write([]byte(`{"sobjects":[
+				{"name":"Account","label":"Account","custom":false,"keyPrefix":"001","queryable":true},
+				{"name":"Contact","label":"Contact","custom":false,"keyPrefix":"003","queryable":true},
+				{"name":"User","label":"User","custom":false,"keyPrefix":"005","queryable":true},
+				{"name":"Hidden","label":"Hidden","queryable":false}]}`))
+		case r.URL.Path == "/services/data/v64.0/sobjects/User/describe":
+			w.Write([]byte(`{"name":"User","label":"User","keyPrefix":"005","fields":[{"name":"Id","label":"User ID","type":"id"},{"name":"Alias","label":"Alias","type":"string","length":8}]}`))
+		case strings.HasSuffix(r.URL.Path, "/describe"):
+			w.Write([]byte(`{"name":"Account","label":"Account","keyPrefix":"001","fields":[
+				{"name":"Id","label":"Account ID","type":"id"},
+				{"name":"Name","label":"Name","type":"string","length":255,"nillable":false,"createable":true,"updateable":true},
+				{"name":"OwnerId","label":"Owner ID","type":"reference","referenceTo":["User"],"relationshipName":"Owner"}]}`))
 		case r.URL.Path == "/services/data/v64.0/limits":
 			w.Write([]byte(`{"DailyApiRequests":{"Max":100000,"Remaining":25000}}`))
 		default:
@@ -88,7 +103,7 @@ func (s staticCreds) Credentials(context.Context, bool) (api.Credentials, error)
 func drive(t *testing.T, m *Model, msg tea.Msg) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
-	queue := []tea.Msg{msg}
+	queue := expand(msg)
 	for len(queue) > 0 {
 		if time.Now().After(deadline) {
 			t.Fatal("message loop did not settle")
@@ -144,10 +159,17 @@ func key(s string) tea.KeyMsg {
 	return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(s)}
 }
 
+// loadAllOrgs runs both org-load passes (fast inventory, then connection
+// statuses) to completion.
+func loadAllOrgs(t *testing.T, m *Model) {
+	t.Helper()
+	drive(t, m, m.loadOrgs()())
+}
+
 func TestStartupToOrgsView(t *testing.T) {
 	srv := testServer(t)
 	m := newTestModel(t, srv.URL)
-	drive(t, m, m.loadOrgs()())
+	loadAllOrgs(t, m)
 	view := m.View()
 	if !strings.Contains(view, "prod") || !strings.Contains(view, "alex@corp.com") {
 		t.Fatalf("orgs view should list org:\n%s", view)
@@ -160,13 +182,69 @@ func TestStartupToOrgsView(t *testing.T) {
 	}
 }
 
+func TestTwoPhaseOrgLoad(t *testing.T) {
+	srv := testServer(t)
+	m := newTestModel(t, srv.URL)
+	fastList := `{"status":0,"result":{"nonScratchOrgs":[
+		{"username":"alex@corp.com","aliases":["prod"],"orgId":"00D1","instanceUrl":"https://x.my.salesforce.com","isDefaultUsername":true},
+		{"username":"gone@corp.com","aliases":["gone"],"orgId":"00D3","instanceUrl":"https://z.my.salesforce.com"}
+	],"scratchOrgs":[]}}`
+	m.deps.SF = sfcli.New(fakeRunner{out: map[string]string{
+		"org list --skip-connection-status": fastList,
+		"org list":                          testOrgList,
+	}})
+
+	// Phase 1: inventory renders with no statuses yet.
+	drive(t, m, orgsLoadedMsg{orgs: mustOrgs(t, fastList), partial: true})
+	view := m.View()
+	if !strings.Contains(view, "prod") || !strings.Contains(view, "checking…") {
+		t.Fatalf("phase 1 should list orgs with a pending status:\n%s", view)
+	}
+	if !m.awaitingStatuses {
+		t.Error("app should indicate statuses are still arriving")
+	}
+	if m.current == nil {
+		t.Error("default org must be selectable during phase 1")
+	}
+
+	// Cursor on the second row must survive the enrichment pass.
+	drive(t, m, key("j"))
+	drive(t, m, orgsLoadedMsg{orgs: mustOrgs(t, testOrgList)})
+	view = m.View()
+	if !strings.Contains(view, "Connected") {
+		t.Fatalf("phase 2 should fill in statuses:\n%s", view)
+	}
+	if m.awaitingStatuses {
+		t.Error("status pass finished; indicator should clear")
+	}
+	if !strings.Contains(view, "Unknown") {
+		t.Fatalf("an org missing from the status pass should be kept as Unknown:\n%s", view)
+	}
+	ov := m.views[ViewOrgs].(*orgsView)
+	if got := ov.table.Cell("Username"); got != "gone@corp.com" {
+		t.Errorf("cursor should stay on the same org across enrichment, got %q", got)
+	}
+	if len(m.orgs) != 2 {
+		t.Errorf("merge must not duplicate or drop rows: %d", len(m.orgs))
+	}
+}
+
+func mustOrgs(t *testing.T, listJSON string) []sfcli.Org {
+	t.Helper()
+	orgs, err := sfcli.New(fakeRunner{out: map[string]string{"org list": listJSON}}).Orgs(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return orgs
+}
+
 func TestNoOrgsFriendlyError(t *testing.T) {
 	srv := testServer(t)
 	m := newTestModel(t, srv.URL)
 	m.deps.SF = sfcli.New(fakeRunner{out: map[string]string{
 		"org list": `{"status":0,"result":{"nonScratchOrgs":[],"scratchOrgs":[]}}`,
 	}})
-	drive(t, m, m.loadOrgs()())
+	loadAllOrgs(t, m)
 	view := m.View()
 	if !strings.Contains(view, "No authenticated orgs") || !strings.Contains(view, "sf org login web") {
 		t.Fatalf("expected friendly no-orgs screen:\n%s", view)
@@ -176,7 +254,7 @@ func TestNoOrgsFriendlyError(t *testing.T) {
 func TestQueryFlowEndToEnd(t *testing.T) {
 	srv := testServer(t)
 	m := newTestModel(t, srv.URL)
-	drive(t, m, m.loadOrgs()())
+	loadAllOrgs(t, m)
 	drive(t, m, key("enter")) // select org, jump to query view
 	if m.active != ViewQuery {
 		t.Fatalf("enter on org should open query view, active=%v", m.active)
@@ -203,7 +281,7 @@ func TestQueryErrorSurfacesToast(t *testing.T) {
 	}))
 	defer srv.Close()
 	m := newTestModel(t, srv.URL)
-	drive(t, m, m.loadOrgs()())
+	loadAllOrgs(t, m)
 	drive(t, m, key("enter"))
 	qv := m.views[ViewQuery].(*queryView)
 	qv.setEditorText("SELECT Id FORM Account")
@@ -219,7 +297,7 @@ func TestQueryErrorSurfacesToast(t *testing.T) {
 func TestSchemaBrowseAndBuildQuery(t *testing.T) {
 	srv := testServer(t)
 	m := newTestModel(t, srv.URL)
-	drive(t, m, m.loadOrgs()())
+	loadAllOrgs(t, m)
 	drive(t, m, switchViewMsg{id: ViewSchema})
 	sv := m.views[ViewSchema].(*schemaView)
 	if cmd := sv.Init(); cmd != nil {
@@ -242,7 +320,7 @@ func TestSchemaBrowseAndBuildQuery(t *testing.T) {
 		t.Fatal("c should jump to query view")
 	}
 	qv := m.views[ViewQuery].(*queryView)
-	if !strings.Contains(qv.editor.Value(), "SELECT Id, Name FROM Account") {
+	if !strings.Contains(qv.editor.Value(), "SELECT Id, Name, OwnerId FROM Account") {
 		t.Fatalf("query should be prefilled, got %q", qv.editor.Value())
 	}
 }
@@ -250,7 +328,7 @@ func TestSchemaBrowseAndBuildQuery(t *testing.T) {
 func TestLimitsView(t *testing.T) {
 	srv := testServer(t)
 	m := newTestModel(t, srv.URL)
-	drive(t, m, m.loadOrgs()())
+	loadAllOrgs(t, m)
 	drive(t, m, switchViewMsg{id: ViewLimits})
 	lv := m.views[ViewLimits].(*limitsView)
 	if cmd := lv.Init(); cmd != nil {
@@ -265,7 +343,7 @@ func TestLimitsView(t *testing.T) {
 func TestPaletteNavigation(t *testing.T) {
 	srv := testServer(t)
 	m := newTestModel(t, srv.URL)
-	drive(t, m, m.loadOrgs()())
+	loadAllOrgs(t, m)
 	drive(t, m, key(":"))
 	if !m.palette.open {
 		t.Fatal("palette should open on :")
@@ -287,7 +365,7 @@ func TestOrgGuardOnViews(t *testing.T) {
 			{"username":"a@b.c","aliases":["x"],"orgId":"00D2","instanceUrl":"https://y.my.salesforce.com","connectedStatus":"Connected","isDefaultUsername":false}
 		],"scratchOrgs":[]}}`,
 	}})
-	drive(t, m, m.loadOrgs()())
+	loadAllOrgs(t, m)
 	if m.current != nil {
 		t.Fatal("no default org — nothing should be auto-selected")
 	}
@@ -303,7 +381,7 @@ func TestOrgGuardOnViews(t *testing.T) {
 func TestStaleCrossOrgResponseIgnored(t *testing.T) {
 	srv := testServer(t)
 	m := newTestModel(t, srv.URL)
-	drive(t, m, m.loadOrgs()())
+	loadAllOrgs(t, m)
 
 	drive(t, m, switchViewMsg{id: ViewLogs})
 	oldView := m.views[ViewLogs].(*logsView)
@@ -332,7 +410,7 @@ func TestStaleCrossOrgResponseIgnored(t *testing.T) {
 func TestOrgReloadFailureKeepsSession(t *testing.T) {
 	srv := testServer(t)
 	m := newTestModel(t, srv.URL)
-	drive(t, m, m.loadOrgs()())
+	loadAllOrgs(t, m)
 	if m.current == nil {
 		t.Fatal("precondition: org selected")
 	}
@@ -353,7 +431,7 @@ func TestInitialOrgTypoDoesNotFallBack(t *testing.T) {
 	srv := testServer(t)
 	m := newTestModel(t, srv.URL)
 	m.deps.InitialOrg = "porduction"
-	drive(t, m, m.loadOrgs()())
+	loadAllOrgs(t, m)
 	if m.current != nil {
 		t.Fatalf("a typo'd -o value must not silently select %q", m.current.Title())
 	}
@@ -365,7 +443,7 @@ func TestInitialOrgTypoDoesNotFallBack(t *testing.T) {
 func TestHelpOverlay(t *testing.T) {
 	srv := testServer(t)
 	m := newTestModel(t, srv.URL)
-	drive(t, m, m.loadOrgs()())
+	loadAllOrgs(t, m)
 	drive(t, m, key("?"))
 	if !strings.Contains(m.View(), "sf9s — keys") {
 		t.Fatalf("help overlay should render:\n%s", m.View())
@@ -381,7 +459,7 @@ func TestClipboardCopyInstanceURL(t *testing.T) {
 	m := newTestModel(t, srv.URL)
 	var copied []string
 	m.deps.Clipboard = func(s string) error { copied = append(copied, s); return nil }
-	drive(t, m, m.loadOrgs()())
+	loadAllOrgs(t, m)
 	drive(t, m, key("Y"))
 	if len(copied) != 1 || copied[0] != "https://x.my.salesforce.com" {
 		t.Fatalf("Y should copy instance URL, copied=%v", copied)
