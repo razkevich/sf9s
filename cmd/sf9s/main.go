@@ -101,10 +101,11 @@ func main() {
 				}, nil
 			}))
 		},
-		Clipboard:  clipboard.WriteAll,
-		OpenURL:    browser.OpenURL,
-		Version:    version,
-		InitialOrg: *org,
+		Clipboard:     clipboard.WriteAll,
+		ClipboardRead: clipboard.ReadAll,
+		OpenURL:       browser.OpenURL,
+		Version:       version,
+		InitialOrg:    *org,
 	}
 
 	// A dumb terminal cannot render styling; lipgloss only checks NO_COLOR.

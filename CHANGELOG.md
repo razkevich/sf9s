@@ -1,5 +1,27 @@
 # Changelog
 
+## v0.3.1 — 2026-07-26
+
+Rough edges from the review round, none of them severe, all of them the kind
+of thing that makes a tool feel unfinished.
+
+- Long paths and API errors truncate in the **middle**, keeping the filename
+  and the reason instead of cutting off exactly the useful part.
+- `sf9s -o <typo>` keeps explaining why no org is selected, instead of showing
+  a warning for four seconds and then an empty header.
+- One timestamp format everywhere, in your own timezone, with how long ago:
+  `2026-07-24 16:41 (1d ago)` rather than `2026-07-24T13:41:15.000+0000`.
+- The saved-query picker shows the highlighted query in full, so you can read
+  one before running it.
+- Copying an access token says what it grants and clears the clipboard after
+  90 seconds — and only if the token is still what is on it.
+- Building a query from the schema view marks the rows still on screen as
+  belonging to the previous query.
+- JSON decode failures describe what could not be read rather than naming Go
+  types.
+- Fixed: an org action's follow-up (the clipboard clear) was dropped when the
+  view rebuilt the message from its parts.
+
 ## v0.3.0 — 2026-07-26
 
 Four independent reviews — a Salesforce developer, an admin/consultant, a

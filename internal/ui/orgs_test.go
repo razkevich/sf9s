@@ -3,6 +3,7 @@ package ui
 import (
 	"strings"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -363,5 +364,76 @@ func TestOrgKindPrefersWhatTheOrgSaysAboutItself(t *testing.T) {
 	sandbox := sfcli.Org{InstanceURL: "https://x.sandbox.my.salesforce.com"}
 	if got := orgKind(sandbox, &api.OrgInfo{}); got != "sandbox" {
 		t.Errorf("orgKind = %q, want sandbox", got)
+	}
+}
+
+func TestCopiedTokenIsWarnedAbout(t *testing.T) {
+	srv := testServer(t)
+	m := newTestModel(t, srv.URL)
+	m.deps.SF = sfcli.New(fakeRunner{out: map[string]string{
+		"org list":                     testOrgList,
+		"org display -o alex@corp.com": `{"status":0,"result":{"id":"00D1","accessToken":"00D1!LIVE_TOKEN","instanceUrl":"https://x.my.salesforce.com","apiVersion":"64.0"}}`,
+	}})
+	var copied string
+	m.deps.Clipboard = func(s string) error { copied = s; return nil }
+	m.deps.ClipboardRead = nil // no auto-clear here, so the warning stands
+	loadAllOrgs(t, m)
+
+	drive(t, m, key("y"))
+	if copied != "00D1!LIVE_TOKEN" {
+		t.Fatalf("y should copy the access token, got %q", copied)
+	}
+	view := m.View()
+	if !strings.Contains(view, "grants full API access") {
+		t.Errorf("copying a live session token deserves a warning:\n%s", view)
+	}
+	if strings.Contains(view, "clipboard clears") {
+		t.Errorf("without a way to read the clipboard, sf9s must not promise to clear it:\n%s", view)
+	}
+}
+
+func TestCopiedTokenIsClearedButLaterCopiesAreNot(t *testing.T) {
+	srv := testServer(t)
+	m := newTestModel(t, srv.URL)
+	m.deps.SF = sfcli.New(fakeRunner{out: map[string]string{
+		"org list":                     testOrgList,
+		"org display -o alex@corp.com": `{"status":0,"result":{"id":"00D1","accessToken":"00D1!LIVE_TOKEN","instanceUrl":"https://x.my.salesforce.com","apiVersion":"64.0"}}`,
+	}})
+	clipboard := ""
+	var writes []string
+	m.deps.Clipboard = func(s string) error {
+		clipboard = s
+		writes = append(writes, s)
+		return nil
+	}
+	m.deps.ClipboardRead = func() (string, error) { return clipboard, nil }
+	m.clipboardTTL = time.Millisecond
+	loadAllOrgs(t, m)
+
+	drive(t, m, key("y"))
+	if len(writes) == 0 || writes[0] != "00D1!LIVE_TOKEN" {
+		t.Fatalf("the token should have been copied first, writes = %v", writes)
+	}
+	if clipboard != "" {
+		t.Errorf("the scheduled clear should have removed the token, clipboard = %q", clipboard)
+	}
+	if !strings.Contains(m.View(), "cleared from the clipboard") {
+		t.Errorf("the user should be told it was cleared:\n%s", m.View())
+	}
+
+	// Anything the user copied since must survive.
+	clipboard = "something the user copied since"
+	drive(t, m, clearClipboardMsg{expect: "00D1!LIVE_TOKEN"})
+	if clipboard != "something the user copied since" {
+		t.Errorf("a later copy must not be clobbered, clipboard = %q", clipboard)
+	}
+}
+
+func TestClipboardExpiryNoteOnlyPromisesWhatItCanDo(t *testing.T) {
+	if got := clipboardExpiryNote(true); !strings.Contains(got, "90s") {
+		t.Errorf("the note should state the deadline, got %q", got)
+	}
+	if got := clipboardExpiryNote(false); got != "" {
+		t.Errorf("no promise when sf9s cannot clear, got %q", got)
 	}
 }

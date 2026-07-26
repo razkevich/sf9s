@@ -164,7 +164,10 @@ func (v *orgsView) Update(msg tea.Msg) tea.Cmd {
 	switch msg := msg.(type) {
 	case orgActionMsg:
 		v.busy = false
-		return toast(msg.toast.kind, msg.toast.text)
+		// Pass the whole message through: rebuilding it from kind and text
+		// would drop the follow-up it carries (clearing a copied token).
+		out := msg.toast
+		return func() tea.Msg { return out }
 	case tea.KeyMsg:
 		if v.card != nil {
 			return v.cardKey(msg)
@@ -202,7 +205,12 @@ func (v *orgsView) Update(msg tea.Msg) tea.Cmd {
 				if err := v.app.deps.Clipboard(token); err != nil {
 					return statusMsg{kind: statusError, text: err.Error()}
 				}
-				return statusMsg{kind: statusOK, text: "access token copied to clipboard"}
+				return statusMsg{
+					kind: statusWarn,
+					text: "access token copied — it grants full API access to this org" +
+						clipboardExpiryNote(v.app.deps.ClipboardRead != nil && v.app.clipboardTTL > 0),
+					clearClipboard: token,
+				}
 			})
 		case "Y":
 			if org := v.selected(); org != nil {
@@ -238,6 +246,17 @@ func (v *orgsView) cardKey(msg tea.KeyMsg) tea.Cmd {
 		v.card = nil
 	}
 	return nil
+}
+
+// tokenClipboardTTL bounds how long a live session token sits on the
+// clipboard, where clipboard managers keep history.
+const tokenClipboardTTL = 90 * time.Second
+
+func clipboardExpiryNote(willClear bool) string {
+	if willClear {
+		return "; clipboard clears in 90s"
+	}
+	return ""
 }
 
 // openOrg delegates to `sf org open` so the session token never passes

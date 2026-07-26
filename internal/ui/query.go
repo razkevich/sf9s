@@ -53,6 +53,10 @@ type queryView struct {
 	// four-second toast is not enough to find a file by.
 	exported string
 
+	// staleResults marks rows that belong to an earlier query than the one
+	// now in the editor.
+	staleResults bool
+
 	// lastErr is the failure of the most recent run, shown until the next
 	// successful one so it cannot be mistaken for an empty result.
 	lastErr error
@@ -157,6 +161,9 @@ func (v *queryView) setEditorText(s string) {
 	v.editor.SetValue(s)
 	v.focusResults = false
 	v.editor.Focus()
+	// The rows on screen belong to the previous query; say so rather than
+	// let them read as this one's.
+	v.staleResults = v.table.RowCount() > 0
 }
 
 type queryDoneMsg struct {
@@ -181,6 +188,7 @@ func (v *queryView) runQuery() tea.Cmd {
 	v.running = true
 	v.lastErr = nil
 	v.exported = ""
+	v.staleResults = false
 	client := v.app.client
 	tooling := v.tooling
 	store := v.app.deps.Store
@@ -715,6 +723,30 @@ func collapse(q string) string {
 // exportedMsg reports where an export landed.
 type exportedMsg struct{ path string }
 
+// wrapText breaks a long single-line value onto terminal-width lines.
+func wrapText(s string, width int) string {
+	if width < 20 {
+		width = 20
+	}
+	var out []string
+	line := ""
+	for _, word := range strings.Fields(s) {
+		switch {
+		case line == "":
+			line = word
+		case runewidth.StringWidth(line)+1+runewidth.StringWidth(word) <= width:
+			line += " " + word
+		default:
+			out = append(out, line)
+			line = word
+		}
+	}
+	if line != "" {
+		out = append(out, line)
+	}
+	return strings.Join(out, "\n")
+}
+
 // oneLine flattens a message for single-line display. Salesforce error bodies
 // are frequently multi-line, and extra lines push the app's own chrome off
 // the screen.
@@ -811,8 +843,17 @@ func (v *queryView) View(width, height int) string {
 		return v.card.View(width, height)
 	}
 	if v.showPicker {
-		v.picker.SetSize(width-4, height-3)
-		return styleTitle.Render("Saved queries") + " " + styleDim.Render("(enter runs, esc closes)") + "\n" + v.picker.View()
+		// The list names the queries; the pane below shows the highlighted one
+		// in full. Running a query you could not read is a poor bargain.
+		listH := clampInt(len(v.saved)+2, 4, max(height/2, 4))
+		v.picker.SetSize(width-4, listH)
+		preview := ""
+		if row := v.picker.CurrentRow(); len(row) > 2 {
+			preview = "\n" + styleDim.Render("query") + "\n" +
+				styleEditorFocused.Width(width-4).Render(wrapText(row[2], width-10))
+		}
+		return styleTitle.Render("Saved queries") + " " +
+			styleDim.Render("(enter runs, esc closes)") + "\n" + v.picker.View() + preview
 	}
 
 	head := styleTitle.Render("SOQL")
@@ -829,9 +870,11 @@ func (v *queryView) View(width, height int) string {
 	resultHead := ""
 	switch {
 	case v.exported != "":
-		resultHead = styleOK.Render("saved → " + runewidth.Truncate(v.exported, max(width-10, 20), "…"))
+		resultHead = styleOK.Render("saved → " + truncateMiddle(v.exported, max(width-10, 20)))
 	case v.lastErr != nil:
-		resultHead = styleErrText.Render("✖ " + runewidth.Truncate(oneLine(v.lastErr.Error()), max(width-4, 20), "…"))
+		resultHead = styleErrText.Render("✖ " + truncateMiddle(oneLine(v.lastErr.Error()), max(width-4, 20)))
+	case v.staleResults && v.result != nil:
+		resultHead = styleWarn.Render(fmt.Sprintf("%d rows from the previous query — ctrl+r to run this one", v.fetched))
 	case v.result != nil:
 		resultHead = styleDim.Render(fmt.Sprintf("%d/%d rows • %s", v.fetched, v.result.TotalSize, v.elapsed.Round(time.Millisecond)))
 		if v.result.NextRecordsURL != "" {

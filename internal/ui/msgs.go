@@ -19,6 +19,9 @@ const (
 type statusMsg struct {
 	kind statusKind
 	text string
+	// clearClipboard, when set, schedules dropping this value from the
+	// clipboard after a delay.
+	clearClipboard string
 }
 
 type clearStatusMsg struct{ id int }
@@ -53,6 +56,10 @@ type orgInfoMsg struct {
 	info  *api.OrgInfo
 	err   error
 }
+
+// clearClipboardMsg asks the root to drop a copied secret, if it is still
+// the thing on the clipboard.
+type clearClipboardMsg struct{ expect string }
 
 // switchOrgMsg asks the root to switch org by alias or username.
 type switchOrgMsg struct{ title string }

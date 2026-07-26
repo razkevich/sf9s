@@ -108,6 +108,9 @@ func (m *Model) contextBlock() string {
 	if m.current != nil && m.current.InstanceURL != "" {
 		api = m.current.InstanceURL
 	}
+	if m.current == nil && m.noOrgReason != "" {
+		org = m.noOrgReason
+	}
 	rows := [][2]string{
 		{"Org", org},
 		{"User", user},
@@ -123,9 +126,14 @@ func (m *Model) contextBlock() string {
 		if i > 0 {
 			b.WriteByte('\n')
 		}
-		value := runewidth.Truncate(r[1], 30, "…")
+		value := runewidth.Truncate(r[1], 44, "…")
+		if r[0] != "Org" {
+			value = runewidth.Truncate(r[1], 30, "…")
+		}
 		b.WriteString(styleHeaderKey.Render(padRight(r[0]+":", 7)))
 		switch {
+		case r[0] == "Org" && m.current == nil && m.noOrgReason != "":
+			b.WriteString(styleWarn.Render(value))
 		case r[0] == "Status":
 			b.WriteString(statusCellStyle(value).Render(value))
 		case r[0] == "Org" && m.inProduction():

@@ -110,7 +110,8 @@ func (c *Client) get(ctx context.Context, path string, out any) error {
 	dec := json.NewDecoder(body)
 	dec.UseNumber()
 	if err := dec.Decode(out); err != nil {
-		return fmt.Errorf("unexpected Salesforce response: %w", err)
+		// Go type names mean nothing to the person reading the status bar.
+		return fmt.Errorf("the Salesforce response could not be read (%s)", describeDecodeError(err))
 	}
 	return nil
 }
@@ -164,6 +165,22 @@ func (c *Client) roundTrip(ctx context.Context, method, path string, forceToken 
 		return nil, err
 	}
 	return resp, nil
+}
+
+// describeDecodeError turns a json error into something a user can act on.
+func describeDecodeError(err error) string {
+	var syntax *json.SyntaxError
+	var typeErr *json.UnmarshalTypeError
+	switch {
+	case errors.As(err, &syntax):
+		return fmt.Sprintf("malformed JSON at byte %d", syntax.Offset)
+	case errors.As(err, &typeErr):
+		return fmt.Sprintf("unexpected %s for %s", typeErr.Value, typeErr.Field)
+	case errors.Is(err, io.ErrUnexpectedEOF):
+		return "the response ended early"
+	default:
+		return "unexpected shape"
+	}
 }
 
 func decodeAPIError(resp *http.Response) error {

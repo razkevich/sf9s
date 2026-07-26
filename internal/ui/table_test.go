@@ -3,6 +3,7 @@ package ui
 import (
 	"strings"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/mattn/go-runewidth"
@@ -248,5 +249,67 @@ func TestCursorFollowsItsRowAcrossSorting(t *testing.T) {
 	tbl.SortByCursorColumn()
 	if got := tbl.Cell("Name"); got != "a" {
 		t.Fatalf("sorting moved the selection to %q, want a", got)
+	}
+}
+
+func TestTruncateMiddleKeepsBothEnds(t *testing.T) {
+	// The filename and the reason are the parts worth keeping.
+	path := "/Users/someone/Library/Application Support/sf9s/queries.yaml"
+	got := truncateMiddle(path, 30)
+	if runewidth.StringWidth(got) > 30 {
+		t.Fatalf("too wide: %q", got)
+	}
+	if !strings.HasPrefix(got, "/Users/") || !strings.HasSuffix(got, "queries.yaml") {
+		t.Fatalf("both ends should survive: %q", got)
+	}
+	if got := truncateMiddle("short", 30); got != "short" {
+		t.Errorf("a string that fits must be untouched: %q", got)
+	}
+	if w := runewidth.StringWidth(truncateMiddle("日本語のとても長い文字列です", 10)); w > 10 {
+		t.Errorf("wide runes overflowed: %d", w)
+	}
+}
+
+func TestHumanizeTimesRewritesOnlyTimeColumns(t *testing.T) {
+	cols := []string{"Id", "CreatedDate", "Status"}
+	rows := [][]string{{"0Af1", "2026-07-24T13:41:15.000+0000", "Succeeded"}}
+	got := humanizeTimes(cols, rows, map[string]bool{"CreatedDate": true})
+
+	if got[0][0] != "0Af1" || got[0][2] != "Succeeded" {
+		t.Errorf("non-time columns must be untouched: %v", got[0])
+	}
+	if strings.Contains(got[0][1], "T13:41:15.000+0000") {
+		t.Errorf("the wire format should be gone: %q", got[0][1])
+	}
+	if !strings.Contains(got[0][1], "ago") {
+		t.Errorf("a relative hint is the point: %q", got[0][1])
+	}
+	// The source rows must not be mutated — exports keep what the org sent.
+	if rows[0][1] != "2026-07-24T13:41:15.000+0000" {
+		t.Errorf("the underlying result was modified: %q", rows[0][1])
+	}
+}
+
+func TestHumanSinceReadsLikeAPersonWroteIt(t *testing.T) {
+	cases := []struct {
+		d    time.Duration
+		want string
+	}{
+		{30 * time.Second, "just now"},
+		{5 * time.Minute, "5m ago"},
+		{3 * time.Hour, "3h ago"},
+		{50 * time.Hour, "2d ago"},
+		{60 * 24 * time.Hour, "2mo ago"},
+	}
+	for _, tc := range cases {
+		if got := humanSince(tc.d); got != tc.want {
+			t.Errorf("humanSince(%s) = %q, want %q", tc.d, got, tc.want)
+		}
+	}
+}
+
+func TestShortDateFallsBackToTheRawValue(t *testing.T) {
+	if got := shortDate("not a date"); got != "not a date" {
+		t.Errorf("an unparseable value must survive verbatim, got %q", got)
 	}
 }

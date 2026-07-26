@@ -140,7 +140,8 @@ func (v *deploysView) Update(msg tea.Msg) tea.Cmd {
 			return toastErr(msg.err)
 		}
 		v.result = msg.res
-		v.table.SetData(msg.res.Columns, msg.res.Rows)
+		v.table.SetData(msg.res.Columns, humanizeTimes(msg.res.Columns, msg.res.Rows,
+			map[string]bool{"CreatedDate": true, "StartDate": true, "CompletedDate": true}))
 		return nil
 
 	case deployDetailsMsg:

@@ -166,7 +166,8 @@ func (v *logsView) Update(msg tea.Msg) tea.Cmd {
 			return toastErr(msg.err)
 		}
 		v.result = msg.res
-		v.table.SetData(msg.res.Columns, msg.res.Rows)
+		v.table.SetData(msg.res.Columns, humanizeTimes(msg.res.Columns, msg.res.Rows,
+			map[string]bool{"StartTime": true}))
 		v.rememberIDs(msg.res)
 		return nil
 
@@ -349,8 +350,9 @@ func (v *logsView) mergeTail(res *api.Result) int {
 		return 0
 	}
 	ids := idsOf(res)
+	rows := humanizeTimes(res.Columns, res.Rows, map[string]bool{"StartTime": true})
 	var freshRows [][]string
-	for i, row := range res.Rows {
+	for i, row := range rows {
 		if i < len(ids) && v.seen[ids[i]] {
 			continue
 		}

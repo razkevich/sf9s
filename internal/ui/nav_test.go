@@ -484,3 +484,26 @@ func TestCommandModeOrgMatchingIsHelpful(t *testing.T) {
 		t.Errorf("unambiguous partial should select it, got %q", m.current.Alias)
 	}
 }
+
+func TestUnknownInitialOrgKeepsExplainingItself(t *testing.T) {
+	srv := testServer(t)
+	m := newTestModel(t, srv.URL)
+	m.deps.InitialOrg = "porduction"
+	loadAllOrgs(t, m)
+	if m.current != nil {
+		t.Fatal("a typo must not select some other org")
+	}
+
+	// The toast fades; the reason must not, or the header is just dashes.
+	drive(t, m, clearStatusMsg{id: m.statusSeq})
+	view := m.View()
+	if !strings.Contains(view, `org "porduction" was not found`) {
+		t.Fatalf("the header should keep explaining why no org is selected:\n%s", view)
+	}
+
+	// Picking an org clears it.
+	drive(t, m, key("enter"))
+	if strings.Contains(m.View(), "was not found") {
+		t.Errorf("the notice should go once an org is chosen:\n%s", m.View())
+	}
+}

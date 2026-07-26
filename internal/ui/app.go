@@ -77,13 +77,17 @@ func hintLine(hints []keyHint) string {
 
 // Deps wires the outside world into the UI; tests substitute fakes.
 type Deps struct {
-	SF         *sfcli.Client
-	Store      *config.Store
-	NewAPI     func(username string) *api.Client
-	Clipboard  func(string) error
-	OpenURL    func(string) error
-	Version    string
-	InitialOrg string
+	SF        *sfcli.Client
+	Store     *config.Store
+	NewAPI    func(username string) *api.Client
+	Clipboard func(string) error
+	// ClipboardRead lets sf9s clear a copied token later without clobbering
+	// whatever the user copied since. Optional: without it, tokens are still
+	// copied, just never auto-cleared.
+	ClipboardRead func() (string, error)
+	OpenURL       func(string) error
+	Version       string
+	InitialOrg    string
 }
 
 // Model is the root Bubble Tea model.
@@ -124,6 +128,13 @@ type Model struct {
 	statusUntil time.Time
 	statusSeq   int
 	statusTTL   time.Duration
+	// clipboardTTL bounds how long a copied token sits on the clipboard.
+	// Tests set it to zero and drive the clear directly rather than wait.
+	clipboardTTL time.Duration
+
+	// noOrgReason explains why no org is selected, for as long as that is
+	// true — a four-second toast is not an explanation.
+	noOrgReason string
 
 	reqSeq int
 	// pendingOrgInfo carries the org-identity fetch that setOrg started, so
@@ -147,15 +158,16 @@ func New(deps Deps) *Model {
 	sp.Spinner = spinner.MiniDot
 	sp.Style = lipgloss.NewStyle().Foreground(colorAccent)
 	m := &Model{
-		deps:        deps,
-		views:       map[ViewID]view{},
-		palette:     newPalette(),
-		helpView:    newHelpOverlay(),
-		spin:        sp,
-		loadingOrgs: true,
-		active:      ViewOrgs,
-		statusTTL:   5 * time.Second,
-		orgInfo:     map[string]*api.OrgInfo{},
+		deps:         deps,
+		views:        map[ViewID]view{},
+		palette:      newPalette(),
+		helpView:     newHelpOverlay(),
+		spin:         sp,
+		loadingOrgs:  true,
+		active:       ViewOrgs,
+		statusTTL:    5 * time.Second,
+		clipboardTTL: tokenClipboardTTL,
+		orgInfo:      map[string]*api.OrgInfo{},
 	}
 	return m
 }
@@ -233,6 +245,7 @@ func (m *Model) setOrg(org sfcli.Org) {
 	}
 	o := org
 	m.current = &o
+	m.noOrgReason = ""
 	m.client = m.deps.NewAPI(org.Username)
 	// Stop background polling before discarding its view, so nothing keeps
 	// querying the org we just left.
@@ -463,6 +476,17 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, tea.Batch(cmds...)
 
+	case clearClipboardMsg:
+		// Only clear what we put there.
+		if m.deps.ClipboardRead == nil {
+			return m, nil
+		}
+		if current, err := m.deps.ClipboardRead(); err == nil && current == msg.expect {
+			_ = m.deps.Clipboard("")
+			return m, toast(statusInfo, "access token cleared from the clipboard")
+		}
+		return m, nil
+
 	case orgInfoMsg:
 		if msg.err != nil {
 			return m, nil // identity is advisory; the org still works
@@ -478,11 +502,19 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case statusMsg:
 		msg.text = oneLine(msg.text)
+		secret := msg.clearClipboard
+		msg.clearClipboard = ""
 		m.status = msg
 		m.statusSeq++
 		m.statusUntil = time.Now().Add(5 * time.Second)
 		seq := m.statusSeq
-		return m, tea.Tick(m.statusTTL, func(time.Time) tea.Msg { return clearStatusMsg{id: seq} })
+		cmds := []tea.Cmd{tea.Tick(m.statusTTL, func(time.Time) tea.Msg { return clearStatusMsg{id: seq} })}
+		if secret != "" && m.deps.ClipboardRead != nil && m.clipboardTTL > 0 {
+			cmds = append(cmds, tea.Tick(m.clipboardTTL, func(time.Time) tea.Msg {
+				return clearClipboardMsg{expect: secret}
+			}))
+		}
+		return m, tea.Batch(cmds...)
 
 	case clearStatusMsg:
 		if msg.id == m.statusSeq {
@@ -640,8 +672,11 @@ func (m *Model) autoSelectOrg() tea.Cmd {
 			}
 		}
 		// An explicitly requested org that doesn't exist must not silently
-		// fall back — the user would act against the wrong org.
-		return toast(statusWarn, fmt.Sprintf("org %q not found — pick one below", m.deps.InitialOrg))
+		// fall back — the user would act against the wrong org. The notice
+		// outlives the toast: an empty header with no explanation reads as a
+		// failure of the app.
+		m.noOrgReason = fmt.Sprintf("org %q was not found — pick one below", m.deps.InitialOrg)
+		return toast(statusWarn, m.noOrgReason)
 	}
 	for _, o := range m.orgs {
 		if o.IsDefault {
@@ -790,7 +825,7 @@ func (m *Model) statusBar() string {
 			style = styleToastErr
 		}
 		left += styleStatusDim.Render("  ") +
-			style.Render(runeTrunc(m.status.text, m.width-lipgloss.Width(left)-4))
+			style.Render(truncateMiddle(m.status.text, m.width-lipgloss.Width(left)-4))
 	} else if m.compactHeader() && !m.palette.open && !m.showHelp {
 		// The compact header has no room for the key legend, so keep it here.
 		left += styleStatusDim.Render("  " + hintLine(m.currentView().Keys()))

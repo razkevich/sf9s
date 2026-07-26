@@ -508,6 +508,67 @@ func (t *dataTable) footer(lastCol int) string {
 	return styleDim.Render(runewidth.Truncate(seg, t.width, "…"))
 }
 
+// truncateMiddle keeps both ends of a string, dropping the middle. Cutting
+// from the right hides exactly what matters in the two things this app
+// truncates most: a file path (the filename) and an API error (the reason).
+func truncateMiddle(s string, w int) string {
+	if w <= 0 {
+		return ""
+	}
+	if runewidth.StringWidth(s) <= w {
+		return s
+	}
+	if w <= 3 {
+		return runewidth.Truncate(s, w, "")
+	}
+	keep := w - 1 // the ellipsis
+	head := keep / 2
+	tail := keep - head
+	r := []rune(s)
+	return runewidth.Truncate(string(r), head, "") + "…" +
+		string(r[len(r)-tailRunes(r, tail):])
+}
+
+// tailRunes returns how many trailing runes fit in the given display width.
+func tailRunes(r []rune, width int) int {
+	used, n := 0, 0
+	for i := len(r) - 1; i >= 0; i-- {
+		w := runewidth.RuneWidth(r[i])
+		if used+w > width {
+			break
+		}
+		used += w
+		n++
+	}
+	return n
+}
+
+// humanizeTimes rewrites the named columns from Salesforce's wire format into
+// something readable, without touching the underlying result (exports and
+// paging keep exactly what the org returned).
+func humanizeTimes(cols []string, rows [][]string, timeCols map[string]bool) [][]string {
+	idx := make([]int, 0, len(timeCols))
+	for i, c := range cols {
+		if timeCols[c] {
+			idx = append(idx, i)
+		}
+	}
+	if len(idx) == 0 {
+		return rows
+	}
+	out := make([][]string, len(rows))
+	for i, row := range rows {
+		clone := append([]string{}, row...)
+		for _, c := range idx {
+			if c < len(clone) && clone[c] != "" {
+				clone[c] = relDate(clone[c])
+			}
+		}
+		out[i] = clone
+	}
+	return out
+}
+
 // plural renders "1 thing" / "2 things".
 func plural(n int, noun string) string {
 	if n == 1 {

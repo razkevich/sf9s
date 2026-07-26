@@ -94,6 +94,7 @@ func newTestModel(t *testing.T, srvURL string) *Model {
 	m := New(deps)
 	m.width, m.height = 120, 40
 	m.statusTTL = time.Millisecond
+	m.clipboardTTL = 0 // tests drive the clear directly instead of waiting
 	return m
 }
 
@@ -444,7 +445,7 @@ func TestInitialOrgTypoDoesNotFallBack(t *testing.T) {
 	if m.current != nil {
 		t.Fatalf("a typo'd -o value must not silently select %q", m.current.Title())
 	}
-	if !strings.Contains(m.View(), `org "porduction" not found`) {
+	if !strings.Contains(m.View(), `org "porduction" was not found`) {
 		t.Fatalf("expected not-found warning:\n%s", m.View())
 	}
 }

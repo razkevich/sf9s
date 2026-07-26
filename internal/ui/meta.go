@@ -187,14 +187,49 @@ func (v *metaView) Update(msg tea.Msg) tea.Cmd {
 	return nil
 }
 
+// shortDate renders a Salesforce timestamp in the reader's own timezone.
+// "2026-07-24T13:41:15.000+0000" answers no question a human asked.
 func shortDate(iso string) string {
-	if t, err := time.Parse(time.RFC3339, iso); err == nil {
-		return t.Local().Format("2006-01-02 15:04")
+	t, ok := parseSalesforceTime(iso)
+	if !ok {
+		return iso
 	}
-	if len(iso) >= 10 {
-		return iso[:10]
+	return t.Local().Format("2006-01-02 15:04")
+}
+
+// relDate adds how long ago it was, which is what "recent" means to a person.
+func relDate(iso string) string {
+	t, ok := parseSalesforceTime(iso)
+	if !ok {
+		return iso
 	}
-	return iso
+	return t.Local().Format("2006-01-02 15:04") + " (" + humanSince(time.Since(t)) + ")"
+}
+
+func parseSalesforceTime(iso string) (time.Time, bool) {
+	for _, layout := range []string{time.RFC3339, "2006-01-02T15:04:05.000-0700", "2006-01-02"} {
+		if t, err := time.Parse(layout, iso); err == nil {
+			return t, true
+		}
+	}
+	return time.Time{}, false
+}
+
+func humanSince(d time.Duration) string {
+	switch {
+	case d < 0:
+		return "just now"
+	case d < time.Minute:
+		return "just now"
+	case d < time.Hour:
+		return fmt.Sprintf("%dm ago", int(d.Minutes()))
+	case d < 24*time.Hour:
+		return fmt.Sprintf("%dh ago", int(d.Hours()))
+	case d < 30*24*time.Hour:
+		return fmt.Sprintf("%dd ago", int(d.Hours()/24))
+	default:
+		return fmt.Sprintf("%dmo ago", int(d.Hours()/(24*30)))
+	}
 }
 
 func (v *metaView) View(width, height int) string {

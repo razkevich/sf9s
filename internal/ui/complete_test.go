@@ -256,3 +256,48 @@ func TestCompletionInsideStringLiteralOffersNothing(t *testing.T) {
 		t.Fatalf("buffer must be untouched, got %q", got)
 	}
 }
+
+func TestBuildingAQueryMarksTheOldResultsStale(t *testing.T) {
+	srv := testServer(t)
+	m := newTestModel(t, srv.URL)
+	loadAllOrgs(t, m)
+	qv := queryViewFor(t, m)
+
+	qv.setEditorText("SELECT Id FROM Account")
+	drive(t, m, key("ctrl+r"))
+	if qv.table.RowCount() == 0 {
+		t.Fatal("precondition: results on screen")
+	}
+	if strings.Contains(m.View(), "previous query") {
+		t.Fatal("fresh results must not be labelled stale")
+	}
+
+	// Schema's build-query prefills the editor without running it.
+	drive(t, m, prefillQueryMsg{soql: "SELECT Id, Name FROM Contact"})
+	view := m.View()
+	if !strings.Contains(view, "previous query") {
+		t.Fatalf("rows from the old query must be marked:\n%s", view)
+	}
+
+	drive(t, m, key("ctrl+r"))
+	if strings.Contains(m.View(), "previous query") {
+		t.Errorf("running clears the marker:\n%s", m.View())
+	}
+}
+
+func TestSavedQueryPickerShowsTheWholeQuery(t *testing.T) {
+	srv := testServer(t)
+	m := newTestModel(t, srv.URL)
+	loadAllOrgs(t, m)
+	qv := queryViewFor(t, m)
+
+	drive(t, m, tea.KeyMsg{Type: tea.KeyCtrlS})
+	if !qv.showPicker {
+		t.Fatal("ctrl+s should open the picker")
+	}
+	view := m.View()
+	// The starter library's first entry is long; its tail must be reachable.
+	if !strings.Contains(view, "LastLoginDate") {
+		t.Fatalf("the picker should show the whole query, not a 40-char stub:\n%s", view)
+	}
+}
