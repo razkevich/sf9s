@@ -169,6 +169,11 @@ func (v *metaView) Update(msg tea.Msg) tea.Cmd {
 					return v.loadComponents(name)
 				}
 			}
+		case "s":
+			if label := table.SortByCursorColumn(); label != "" {
+				return toast(statusInfo, "sorted by "+label)
+			}
+			return toast(statusInfo, "sort cleared")
 		case "R":
 			if !v.inComps && !v.loading {
 				return v.fetchTypes()

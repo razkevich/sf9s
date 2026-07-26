@@ -288,6 +288,11 @@ func (v *schemaView) Update(msg tea.Msg) tea.Cmd {
 			if f := v.currentField(); f != nil {
 				v.card = newFieldCard(*f, v.app.width, v.app.height-2)
 			}
+		case "s":
+			if label := table.SortByCursorColumn(); label != "" {
+				return toast(statusInfo, "sorted by "+label)
+			}
+			return toast(statusInfo, "sort cleared")
 		case "R":
 			if !v.inFields && !v.loading {
 				return v.fetchObjects()

@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 
@@ -506,4 +507,57 @@ func TestUnknownInitialOrgKeepsExplainingItself(t *testing.T) {
 	if strings.Contains(m.View(), "was not found") {
 		t.Errorf("the notice should go once an org is chosen:\n%s", m.View())
 	}
+}
+
+// Every key a view advertises in its header legend must actually do
+// something there. Two views once listed "s" for sort without binding it.
+func TestAdvertisedKeysAreHandled(t *testing.T) {
+	m := multiOrgModel(t)
+	views := []ViewID{ViewOrgs, ViewQuery, ViewSchema, ViewLimits, ViewMeta, ViewDeploys, ViewLogs}
+
+	// Labels whose handled form differs from how they are written for a
+	// human reader.
+	alias := map[string]string{"space": `, " ":`}
+
+	// Keys handled centrally rather than by the view, and pane/navigation
+	// hints that describe movement rather than a single binding.
+	global := map[string]bool{
+		":": true, "?": true, "f1": true, "f2": true, "ctrl+a": true, "esc": true,
+		"↑↓": true, "1…9": true, "n/N": true, "enter/tab": true, "y/Y": true,
+		"e/E": true, "ctrl+p/n": true, "/": true,
+	}
+
+	for _, id := range views {
+		drive(t, m, switchViewMsg{id: id})
+		v := m.views[id]
+		if v == nil {
+			t.Fatalf("%s view was not built", viewNames[id])
+		}
+		src := viewSource(t, viewNames[id])
+		for _, hint := range v.Keys() {
+			if global[hint.key] {
+				continue
+			}
+			if a, ok := alias[hint.key]; ok {
+				if !strings.Contains(src, a) {
+					t.Errorf("%s advertises %q but never handles it", viewNames[id], hint.key)
+				}
+				continue
+			}
+			if !strings.Contains(src, `case "`+hint.key+`"`) &&
+				!strings.Contains(src, `msg.String() == "`+hint.key+`"`) {
+				t.Errorf("%s advertises %q (%s) but never handles it",
+					viewNames[id], hint.key, hint.desc)
+			}
+		}
+	}
+}
+
+func viewSource(t *testing.T, view string) string {
+	t.Helper()
+	b, err := os.ReadFile(view + ".go")
+	if err != nil {
+		t.Fatalf("reading %s.go: %v", view, err)
+	}
+	return string(b)
 }

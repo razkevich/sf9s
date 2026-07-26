@@ -564,6 +564,12 @@ func (v *queryView) handleKey(msg tea.KeyMsg) tea.Cmd {
 	}
 
 	switch msg.String() {
+	case "ctrl+u":
+		// The textarea binds ctrl+u to "delete to line start"; the header
+		// promises "clear", which on a multi-line query is not the same.
+		v.editor.SetValue("")
+		v.popup = nil
+		return nil
 	case "ctrl+p":
 		return v.histMove(1)
 	case "ctrl+n":
