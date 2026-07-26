@@ -205,3 +205,48 @@ func TestSortSurvivesFilterAndAppend(t *testing.T) {
 		}
 	}
 }
+
+// Regression: clearing a filter kept the cursor's index rather than its row,
+// so the selection silently moved to a different record and the next action
+// acted on that one.
+func TestCursorFollowsItsRowAcrossFilterChanges(t *testing.T) {
+	tbl := newDataTable()
+	tbl.SetSize(60, 10)
+	tbl.SetData([]string{"Name"}, [][]string{
+		{"alpha"}, {"beta"}, {"gamma"}, {"delta"},
+	})
+
+	// Filter down to one row and select it.
+	tbl.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("/")})
+	for _, r := range "gam" {
+		tbl.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+	}
+	tbl.Update(tea.KeyMsg{Type: tea.KeyEnter}) // commit the filter
+	if got := tbl.Cell("Name"); got != "gamma" {
+		t.Fatalf("precondition: cursor on gamma, got %q", got)
+	}
+
+	if !tbl.ClearFilter() {
+		t.Fatal("clearing a committed filter should report that it did")
+	}
+	if got := tbl.Cell("Name"); got != "gamma" {
+		t.Fatalf("after clearing the filter the cursor jumped to %q, want gamma", got)
+	}
+	if tbl.RowCount() != 4 {
+		t.Fatalf("all rows should be back, got %d", tbl.RowCount())
+	}
+}
+
+func TestCursorFollowsItsRowAcrossSorting(t *testing.T) {
+	tbl := newDataTable()
+	tbl.SetSize(60, 10)
+	tbl.SetData([]string{"Name"}, [][]string{{"c"}, {"a"}, {"b"}})
+	tbl.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("j")}) // on "a"
+	if got := tbl.Cell("Name"); got != "a" {
+		t.Fatalf("precondition: cursor on a, got %q", got)
+	}
+	tbl.SortByCursorColumn()
+	if got := tbl.Cell("Name"); got != "a" {
+		t.Fatalf("sorting moved the selection to %q, want a", got)
+	}
+}

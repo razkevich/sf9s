@@ -10,7 +10,7 @@ logs, without leaving your terminal or configuring anything.
 ![go](https://img.shields.io/badge/go-1.26-00ADD8?logo=go&logoColor=white)
 ![license](https://img.shields.io/badge/license-MIT-blue)
 
-<img src="docs/img/query.png" alt="sf9s query view" width="850">
+<img src="docs/img/orgs.png" alt="sf9s orgs view, showing a production org marked" width="850">
 
 </div>
 
@@ -50,22 +50,35 @@ schema is still downloading is answered when it arrives.
 
 <img src="docs/img/complete.png" alt="sf9s SOQL autocomplete" width="850">
 
+## It tells you when you are in production
+
+The `sf` CLI cannot tell a production tenant from a Developer Edition — both
+are simply "not a sandbox" — so every org looks alike in `sf org list`. sf9s
+asks the org what it is and marks it: a red `PROD` badge, the real edition,
+`PRODUCTION` in the list, and a warning when you switch in. Sandboxes, scratch
+orgs, Developer Editions and local emulators are recognised from the instance
+host immediately, before any API call.
+
+Acting on the wrong org is the costliest mistake this tool can help you avoid,
+so nothing you type can change which org you are pointed at: the number keys
+switch org only on the orgs view, and they never renumber themselves.
+
 ## Views
 
 | view | what you get |
 |---|---|
-| **orgs** | every authenticated org: type, status, scratch expiry, defaults. `o` opens it in the browser (via `sf org open`), `y` copies an access token, `Y` the instance URL |
+| **orgs** | every authenticated org: edition, status, scratch expiry, defaults. `d` explains a failing connection in plain English, `o` opens the org in the browser (via `sf org open`), `y` copies an access token, `Y` the instance URL |
 | **query** | multi-line SOQL editor with **autocomplete** (`tab`), history (`ctrl+p/n`), saved-query library (`ctrl+s`), Tooling API toggle (`ctrl+t`), pagination (`m`), row inspector (`enter`), copy cell/row (`y`/`Y`), CSV/JSON export (`e`/`E`) |
-| **schema** | fuzzy-searchable objects → fields with types, reference targets, picklist values; `c` builds a SELECT for the query view, `y` copies API names |
+| **schema** | fuzzy-searchable objects → fields with types, reference targets and whether they are required; `enter` opens a field card with the *complete* picklist, `c` builds a SELECT for the query view, `y` copies API names |
 | **limits** | org limits sorted by usage, with thresholds that go amber at 75% and red at 90% |
 | **meta** | metadata inventory: 200+ types → components with *last modified by/at* — "who touched this layout?" in three keystrokes |
-| **deploys** | recent metadata deployments with component/test counts and error details |
+| **deploys** | recent deployments; `enter` lists the component and Apex test failures with line numbers, `enter` again shows one in full with its stack trace |
 | **logs** | Apex debug logs: browse, open, search inside a log (`/`, `n/N`), **tail** new logs live (`t`), delete |
 
 Every table filters with `/` and sorts with `s`. Exports land in `~/Downloads`
 (override with `SF9S_EXPORT_DIR`).
 
-<img src="docs/img/orgs.png" alt="sf9s orgs view" width="850">
+
 
 ## Navigation (k9s conventions)
 
@@ -109,6 +122,8 @@ queries:
 ```
 
 They're org-agnostic and appear in the `ctrl+s` picker, run on `enter`.
+
+<img src="docs/img/deploys.png" alt="sf9s deploy failure details" width="850">
 
 ## Design notes
 

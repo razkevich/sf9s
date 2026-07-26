@@ -65,6 +65,13 @@ func New() *Server {
 			return
 		}
 		switch {
+		case strings.Contains(q, "FROM Organization"):
+			// What the org says about itself: the only way to tell a
+			// production tenant from a Developer Edition.
+			fmt.Fprint(w, `{"totalSize":1,"done":true,"records":[
+				{"attributes":{"type":"Organization"},"Id":"00DE2E","Name":"Acme Corp",
+				 "OrganizationType":"Enterprise Edition","InstanceName":"NA221",
+				 "IsSandbox":false,"TrialExpirationDate":null}]}`)
 		case strings.Contains(q, "FROM Account"):
 			fmt.Fprint(w, `{"totalSize":3,"done":true,"records":[
 				{"attributes":{"type":"Account"},"Id":"001E2E000000001","Name":"Acme Rockets","Owner":{"attributes":{"type":"User"},"Name":"Alex"},"AnnualRevenue":12000000},

@@ -32,14 +32,27 @@ context, zero configuration to start).
 
 ## Functional requirements
 
+### FR0 — Never let the user act on the wrong org unknowingly
+
+The costliest mistake this tool can enable is running something against
+production. The `sf` CLI cannot distinguish a production tenant from a
+Developer Edition (both are simply "not a sandbox"), so sf9s must ask the org
+itself and say so unmistakably; must infer sandbox/scratch/developer/local
+from the instance host immediately, before any API call; must never let a
+keystroke intended as text change which org is targeted; and must keep the
+numbering of org hotkeys stable so an accidental press is not random.
+
 ### FR1 — Org cockpit (home view)
 - List all orgs known to the local `sf` CLI: alias, username, org type
   (prod/sandbox/scratch/dev hub), connected status, instance URL, API version,
   scratch-org expiry.
 - Indicate default org and default dev hub.
-- Actions: select as working org (Enter), open in browser (`o`), copy access token
-  (`y`), copy instance URL (`Y`), copy frontdoor URL (`f`), refresh list (`R`).
-- Org selection sets a global "current org" shown in the status bar at all times.
+- Actions: select as working org (Enter/space), open in browser (`o`, via
+  `sf org open` so no token passes through sf9s), copy access token (`y`), copy
+  instance URL (`Y`), inspect the org and diagnose a failing connection (`d`),
+  sort (`s`), refresh list (`R`).
+- Org selection sets a global "current org" shown in the header at all times,
+  with its true edition and a production warning.
 
 ### FR2 — SOQL query view
 - Multi-line query editor; Ctrl+Enter (or configurable) executes against current org.
@@ -55,7 +68,10 @@ context, zero configuration to start).
   (e.g. an ISV's custom-object queries) without touching core.
 - Tooling API toggle (`t`) to run the same editor against `/tooling/query`.
 - Export current result set to JSON or CSV file (`e`), path announced in status bar.
-- Errors (MALFORMED_QUERY etc.) shown inline with the API's message, never a crash.
+- Errors (MALFORMED_QUERY etc.) shown inline with the API's message and kept on
+  screen until the next successful run — a failure must never look like an
+  empty result or like nothing having been run.
+- Completion (`tab`) for objects and fields, driven by the describe cache.
 
 ### FR3 — Schema browser
 - List all SObjects (describeGlobal) with fuzzy filter; show label, custom flag,
@@ -116,9 +132,9 @@ context, zero configuration to start).
 ## Out of scope for v1 (roadmap)
 
 - Editing records / DML, metadata deploy/retrieve from the TUI
-- Live streaming log tail (`sf apex tail` equivalent)
+- Creating trace flags so there is something to tail
 - Bulk API job monitoring, Event Monitoring
-- SOSL search, cross-org record/schema diff
+- SOSL search; cross-org record/schema diff
 - Auth flows (device/web login) — delegated to `sf org login`
 - Bubble Tea v2 migration
 - Plugin system

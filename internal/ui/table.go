@@ -174,6 +174,15 @@ func (t *dataTable) computeWidths() {
 }
 
 func (t *dataTable) applyFilter() {
+	// Remember which row the cursor is on, not where it sits: filtering and
+	// clearing change what is at each index, so keeping the index silently
+	// moves the selection to a different record — and the next enter or
+	// delete would act on that one.
+	focused := -1
+	if t.cursor >= 0 && t.cursor < len(t.filtered) {
+		focused = t.filtered[t.cursor]
+	}
+
 	t.filtered = t.filtered[:0]
 	needle := strings.ToLower(t.filter)
 	for i, row := range t.rows {
@@ -189,6 +198,15 @@ func (t *dataTable) applyFilter() {
 		}
 	}
 	t.applySort()
+
+	if focused >= 0 {
+		for i, idx := range t.filtered {
+			if idx == focused {
+				t.cursor = i
+				break
+			}
+		}
+	}
 	t.clampScroll()
 }
 

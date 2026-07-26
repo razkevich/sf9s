@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v0.3.0 — 2026-07-26
 
 Four independent reviews — a Salesforce developer, an admin/consultant, a
 product strategist and a QA engineer — test-drove the app against a mock org
@@ -47,6 +47,8 @@ and 13 real ones. This release is what they found.
   "never ran"; stale limits are labelled with the time they were last good.
 - `Flags` (`ncu`/`cu`) became a `Required` column and readable badges.
 - Metadata names are percent-decoded, so `(Marketing)` is findable.
+- The cursor follows its row through filtering and sorting instead of holding
+  its index, so the next action cannot land on a different record.
 
 ## Unreleased
 

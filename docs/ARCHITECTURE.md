@@ -43,6 +43,7 @@ Two data paths, chosen per operation:
 |---|---|---|---|
 | 1 | Go + Bubble Tea v1 (+ bubbles, lipgloss) | Battle-tested stack of gh-dash & most modern TUIs; single static binary; Elm architecture keeps async UI tractable | Rust/ratatui (slower to ship, no team familiarity); Bubble Tea v2 (younger API, fewer examples — roadmap item) |
 | 2 | Reuse `sf` CLI auth instead of own OAuth | Zero-setup for the entire target audience; no credential storage liability; token refresh handled by sf | Own PKCE flow + keychain (weeks of work, security surface); reading `~/.sfdx` auth files directly (undocumented, encrypted on some platforms, breaks on CLI updates) |
+| 2a | Read the token from `org display`, falling back to `org auth show-access-token` | CLI 2.136.8 (May 2026) removed credentials from `org display` and added the dedicated command. Older CLIs still answer from `org display`, so trying it first costs one process on modern CLIs and none on old ones | Requiring a minimum CLI version (excludes users we cannot see); `SF_TEMP_SHOW_SECRETS` (Salesforce has announced its removal) |
 | 3 | Direct HTTP for hot-path reads | `sf data query` costs 1–3 s of Node startup per call; REST GET is ~100 ms | Shelling out for everything |
 | 4 | 401 → one forced token re-resolve → retry once | Covers token expiry mid-session without loops | Proactive expiry tracking (sf doesn't expose expiry reliably) |
 | 5 | Column order from parsing the SELECT clause, falling back to record keys | JSON objects lose order; users expect columns in the order they typed | Alphabetical-only (surprising) |
@@ -60,11 +61,18 @@ Two data paths, chosen per operation:
 - `Client.Orgs(ctx)` → `[]Org` (alias, username, org type, defaults, expiry, status)
   from `org list`.
 - `Client.Credentials(ctx, usernameOrAlias)` → `Credentials{AccessToken, InstanceURL,
-  APIVersion, OrgID}` from `org display`.
+  APIVersion, OrgID}` from `org display`, with the token fetched separately via
+  `org auth show-access-token` on CLIs that no longer expose it.
+- `Client.OpenOrg` / `Client.OpenPath` — hand the browser hand-off back to the
+  CLI so a session token never passes through our argv or a URL we build.
 - `Client.MetadataTypes(ctx, org)` / `Client.ListMetadata(ctx, org, type)` from
   mdapi describe/list.
 - Sentinel errors: `ErrCLINotFound`, `ErrNoOrgs`; rich `CLIError` carrying sf's
   message for everything else.
+- Every exec sets `WaitDelay`: `sf` is a Node program that spawns helpers, and
+  because output is captured through pipes, one orphaned grandchild would
+  otherwise block `Run` forever — past any context deadline, since the deadline
+  kills a process that has already exited.
 
 ### `internal/api`
 - `TokenSource` interface `{ Credentials(ctx, force bool) (Credentials, error) }` —
@@ -73,8 +81,12 @@ Two data paths, chosen per operation:
 - `Client` (one per selected org): `Query`, `QueryMore`, `ToolingQuery`,
   `DescribeGlobal`, `DescribeSObject`, `Limits`, `RecentDeployments`, `ApexLogs`,
   `ApexLogBody`, `DeleteApexLog`.
-- All requests: 30 s timeout, `Sforce-Call-Options` client string, JSON error
-  bodies decoded into `APIError{StatusCode, ErrorCode, Message}`.
+- Requests are bounded by the caller's context only — a client-level timeout
+  silently capped long log downloads below the deadline the UI had set.
+  Redirects are refused so a bearer token cannot follow one off the instance
+  host, and credentialed requests require https (or loopback, for emulators).
+- `FetchOrgInfo` reads `Organization` so sf9s can tell production from a
+  Developer Edition, which the CLI cannot.
 - Query results: `Result{TotalSize, Done, NextRecordsURL, Columns, Rows}` — rows
   pre-flattened (`Owner.Name` dot paths, `json.Number` preserved, relationship
   sub-queries summarized as `(n rows)`).
@@ -83,15 +95,27 @@ Two data paths, chosen per operation:
 - XDG-compliant: config `~/.config/sf9s/config.yaml`, state (history)
   `~/.local/state/sf9s/`, cache `~/.cache/sf9s/` (per-OS via `os.UserConfigDir`
   etc.).
-- `SavedQueries` loaded from `queries.yaml` (created with starter examples on first
-  run); `History` append-only with dedup + cap 500.
+- `SavedQueries` loaded from `queries.yaml`, written with starter examples the
+  first time the picker is opened; `History` append-only with dedup, cap 500,
+  serialized and written atomically.
+- Cache keys are hashed: sObject and metadata type names come from the org, and
+  an unhashed key would let one escape the cache directory.
 - Describe cache: JSON files keyed by org ID + kind, TTL 15 min.
 
 ### `internal/ui`
-- Root model holds: current org, view stack, status bar, help overlay, command
-  palette, and one model per view (lazy-initialized per org).
-- Views implement a narrow `view` interface (`Update`, `View`, `Title`,
-  `ShortHelp`); navigation is a push/pop stack (Esc pops), `:` palette jumps.
+- Root model holds: current org and what that org reports itself to be
+  (edition, sandbox, trial — the CLI cannot tell production from Developer
+  Edition), the view stack, status bar, help overlay, command palette, and one
+  model per view (lazy-initialized per org).
+- Navigation follows k9s: `:` command mode with aliases, `ctrl+a` for the alias
+  list, numbered hotkeys switching *org* (k9s numbers switch namespace) on the
+  orgs view only, and `esc` unwinding one level at a time through each view's
+  `Bail()`.
+- Keys are structured (`[]keyHint`) rather than a hint string, so the header
+  legend and the `?` overlay cannot drift apart from what the view does.
+- Views implement a narrow `view` interface (`Init`, `Update`, `View`, `Title`,
+  `Keys`, `Bail`, `Capturing`); navigation is a crumb trail that truncates
+  rather than looping when a view is revisited.
 - Every I/O action is a `tea.Cmd` returning a typed msg; a generation counter per
   view discards stale responses (org switched mid-flight).
 - Styles: lipgloss adaptive colors only (light/dark safe); honors NO_COLOR.
@@ -113,4 +137,10 @@ Two data paths, chosen per operation:
 - `config`: temp-dir round-trips (history dedup/cap, saved queries, cache TTL).
 - `ui`: pure `Update()` unit tests — feed msgs, assert model state + emitted cmds;
   no PTY needed. Smoke test via `tea.NewProgram` with `tea.WithoutRenderer`.
-- CI gate: `go vet`, `golangci-lint`, `go test -race ./...`, cross-compile matrix.
+- Real-TUI e2e (`e2e/`): teatest drives the actual program against a fake `sf`
+  binary and an in-process mock org, asserting on rendered frames. A
+  build-tagged tier (`-tags localstack`) runs the same journeys against a live
+  sf-localstack, which is where wrong assumptions about the real API surface.
+- CI gate: `go vet` for all three GOOS on the fast runner (platform-specific
+  build breaks should not wait for the Windows job), `golangci-lint`,
+  `go test -race ./...` on Linux, macOS and Windows.

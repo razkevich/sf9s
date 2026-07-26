@@ -140,8 +140,13 @@ func (h *harness) quit(t *testing.T) {
 
 func TestJourneyOrgsQueryExport(t *testing.T) {
 	h := start(t)
-	// Org discovery: all three orgs listed, default org in the status bar.
-	h.waitFor(t, "Authenticated orgs (3)", "scratchy", "2026-08-15", "Org:", "e2e@example.com")
+	// Org discovery: all three orgs listed, default org in the status bar,
+	// and the org's own edition — a paid edition that is not a sandbox is
+	// production, and must be impossible to miss.
+	// One call: teatest consumes the stream, so splitting these would let a
+	// frame arrive between them and never be seen.
+	h.waitFor(t, "Authenticated orgs (3)", "scratchy", "2026-08-15", "Org:",
+		"e2e@example.com", "PROD", "is PRODUCTION")
 
 	h.key(tea.KeyEnter) // use org, jump to query view
 	h.typeString("SELECT Id, Name, Owner.Name, AnnualRevenue FROM Account")
